@@ -1,0 +1,31 @@
+════════════════════════════════════════════════════════════
+  VEYROZE UPLOADER v3 — RUN LOG
+  Gestartet: 23.4.2026, 21:43:40
+  Logdatei:  /Users/thomas.rssk/Documents/veyroze_uploader/test/results/dup_test/_logs/run_1776973420644.log
+════════════════════════════════════════════════════════════
+[21:43:40] INFO    Start: 1 Gruppe(n), 2 Bild(er)
+[21:43:40] DUPLIKAT  002_duplikat.jpg  (Original: 001_original.jpg)
+
+[21:43:40] PRODUKT 1
+  Titel:     Nike Air Max Size EU 42
+  Marke:     Nike
+  Modell:    Air Max Size
+  Größe:     EU 42
+  Kategorie: Sneaker
+  Farbe:     Schwarz
+  Preis:     42 EUR
+  Konfidenz: 100%
+  Bilder:    1  →  produkt-001
+
+════════════════════════════════════════════════════════════
+  ZUSAMMENFASSUNG
+════════════════════════════════════════════════════════════
+  Laufzeit:          0.2s
+  Bilder gesamt:     2
+  Verarbeitet:       1
+  Duplikate:         1
+  Review:            0
+  Fehler:            0
+  Gespeichert (MB):  0.0
+  CSV-Export:        /Users/thomas.rssk/Documents/veyroze_uploader/test/results/dup_test/_logs/shopify_import_1776973420644.csv
+════════════════════════════════════════════════════════════
