@@ -8,7 +8,7 @@ const genAI = process.env.GEMINI_API_KEY
   : null;
 
 const PROMPT = `You are analyzing photos of a secondhand jeans product for a Shopify listing.
-The photos may include: front/back shots of the jeans, the inner label (brand/model/size), the wash care tag (country of origin), a bag/sticker with a SKU number, and measurement photos (jeans next to a ruler or tape measure).
+The photos may include: front/back shots of the jeans, the inner label (brand/model/size), the wash care tag (country of origin), a bag/sticker with a SKU number, and measurement photos (jeans laid flat next to a ruler or tape measure).
 
 Extract ALL of the following and return ONLY valid JSON, no markdown, no explanation:
 
@@ -26,17 +26,44 @@ Extract ALL of the following and return ONLY valid JSON, no markdown, no explana
     "leg_opening_cm": 20
   },
   "country_of_origin": "country from wash care tag, e.g. Mexico, Pakistan, Bangladesh — null if not visible",
-  "sku": "number or code from the bag/sticker label — null if not visible",
+  "sku": "5-digit integer or null — ONLY from a handwritten number on a plastic bag. NEVER a printed number. NEVER fewer or more than 5 digits.",
   "confidence": "high | medium | low",
   "utility_image_indices": [2, 4]
 }
 
+SKU identification rules — follow exactly:
+- The SKU appears on a semi-transparent or white PLASTIC BAG (Tüte) — the bag itself is often only partially visible (corner or edge of the bag in the frame).
+- The number is handwritten directly on the bag surface in pencil or marker. It is ALWAYS exactly 5 digits (e.g. 48010, 37204, 48009).
+- Count every digit individually before returning. If the result is not exactly 5 digits, re-examine. If still not exactly 5, return null — do not guess or pad.
+- CRITICAL — these are NOT the SKU: numbers printed on wash care tags, numbers on size labels, numbers on brand patches, barcodes, article numbers on sewn-in tags, or any printed text on the garment itself.
+- The wash care tag is a paper or fabric tag sewn into the jeans — any number there is NOT the SKU.
+- If no plastic bag with a handwritten number is visible in any photo, return null.
+- Only one image per product set will contain the SKU bag.
+- FORBIDDEN: a sku value with any digit count other than exactly 5. 4 digits → null. 6 digits → null. Any non-digit character → null.
+
+Self-check before returning JSON:
+1. Count the digits in your sku value. Is it exactly 5? If not, set sku to null.
+2. Is the source a handwritten number on a plastic bag? If not, set sku to null.
+
 Rules:
 - Read size_w and size_l as integers from the label (e.g. W30/L34 → size_w: 30, size_l: 34)
-- measurements must be estimated in cm from the product photos if visible
 - If a value is truly not determinable, use null
 - confidence reflects overall certainty across all extracted fields
-- utility_image_indices: 0-based indices of images that should NOT appear in the Shopify listing — only filter out: (1) photos where a ruler or tape measure is placed next to the jeans, (2) photos showing only a SKU bag or sticker. Do NOT filter out label/badge photos (e.g. the brand patch on the jeans) — those are valid product photos. Use [] if no images need filtering.`;
+- utility_image_indices: 0-based indices of images that should NOT appear in the Shopify listing — only filter out: (1) photos where a ruler or tape measure is placed next to the jeans, (2) photos showing only a SKU bag or sticker. Do NOT filter out label/badge photos (e.g. the brand patch on the jeans) — those are valid product photos. Use [] if no images need filtering.
+
+Measurement rules — follow exactly:
+- A folding ruler (Zollstock) is placed alongside the jeans in the measurement photo.
+- Do NOT estimate or guess. Read the ruler markings directly from the photo.
+- If no ruler is visible in any photo, return null for all measurement fields.
+- For EACH measurement, use this exact method:
+  1. Find the first visible number on the ruler at the top/start of the image.
+  2. Follow the ruler downward as the centimeter values increase.
+  3. Find the last centimeter mark where fabric is still underneath the ruler.
+  4. The next mark has no fabric beneath it — take that number and subtract 1. That is the measurement.
+- length_cm: apply the method above along the full length of the jeans (waistband top to hem bottom).
+- waist_cm: apply the method above across the flat waistband width, then multiply the result by 2 (flat half × 2 = full circumference).
+- leg_opening_cm: apply the method above across the flat leg hem width, then multiply the result by 2 (flat half × 2 = full circumference).
+- Do not round to the nearest 5. Return the exact value from the ruler.`;
 
 async function toInlinePart(filePath) {
   const data = (await fs.promises.readFile(filePath)).toString('base64');
@@ -105,6 +132,61 @@ async function callGemini(imageParts) {
   throw new Error('Alle Gemini-Modelle nicht erreichbar. Bitte später erneut versuchen.');
 }
 
+const SEP_BATCH_PROMPT = `You receive multiple images in order. For EACH image, determine if it is a SEPARATOR PHOTO.
+
+A separator photo shows a translucent/frosted plastic bag (Tüte/Polybeutel, often with a small hanging hole) OR a piece of paper/card, with a HANDWRITTEN 5-digit inventory number on it (in marker or pencil).
+
+Return ONLY a JSON array (no markdown, no prose), one object per input image in original order:
+[{"i":0,"sku":"48005"},{"i":1,"sku":null},...]
+
+Rules:
+- "sku" must be a string of EXACTLY 5 digits, or null.
+- Numbers printed on garment care tags, brand patches, size labels, rulers/tape measures or any printed text are NOT separators — return null for those.
+- Only HANDWRITTEN numbers on a plastic bag or paper count.
+- If unsure, return null. Better to miss than to hallucinate.`;
+
+export async function detectSeparatorsBatch(imagePaths) {
+  if (!genAI || !imagePaths.length) return null;
+  let parts;
+  try { parts = await Promise.all(imagePaths.map(toInlinePart)); }
+  catch { return null; }
+
+  for (const modelName of MODELS) {
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const model  = genAI.getGenerativeModel({ model: modelName });
+        const result = await model.generateContent([SEP_BATCH_PROMPT, ...parts]);
+        const text   = result.response.text().trim();
+        const match  = text.match(/\[[\s\S]*\]/);
+        if (!match) return null;
+        const arr = JSON.parse(match[0]);
+        return imagePaths.map((_, i) => {
+          const item = arr.find(a => a && a.i === i);
+          const sku  = item?.sku;
+          if (sku != null && /^\d{5}$/.test(String(sku).trim()))
+            return { isSeparator: true, sku: String(sku).trim() };
+          return { isSeparator: false, sku: null };
+        });
+      } catch (err) {
+        const status = err?.status;
+        if (status === 404) break;
+        if (RETRYABLE.has(status) && attempt < MAX_ATTEMPTS) {
+          await new Promise(r => setTimeout(r, attempt * 2000));
+          continue;
+        }
+        if (RETRYABLE.has(status)) break;
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+export async function detectSeparatorImage(imagePath) {
+  const result = await detectSeparatorsBatch([imagePath]);
+  return result?.[0] ?? { isSeparator: false, sku: null };
+}
+
 export async function mockKiAnalyze(imageFiles, opts = {}) {
   if (!genAI) return runMock(imageFiles);
 
@@ -138,6 +220,12 @@ export async function mockKiAnalyze(imageFiles, opts = {}) {
 
   const utilitySet   = new Set(Array.isArray(utility_image_indices) ? utility_image_indices : []);
   const productFiles = files.filter((_, i) => !utilitySet.has(i));
+
+  // SKU must be exactly 5 digits — reject anything else regardless of what Gemini returned
+  const validSku = (typeof sku === 'string' || typeof sku === 'number')
+    && /^\d{5}$/.test(String(sku).trim())
+    ? String(sku).trim()
+    : null;
 
   // Längenkorrektur: gemessene Länge < 100cm → L-Größe nach unten korrigieren
   const correctedL    = lengthLabel(size_l, measurements.length_cm);
@@ -188,7 +276,7 @@ export async function mockKiAnalyze(imageFiles, opts = {}) {
     condition,
     measurements,
     country_of_origin: country_of_origin || 'Pakistan',
-    sku,
+    sku: validSku,
     taxable,
     tags,
     collections,

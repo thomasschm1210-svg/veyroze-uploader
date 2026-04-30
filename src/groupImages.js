@@ -1,6 +1,7 @@
 import fs   from 'fs';
 import path from 'path';
 import { isSeparator } from './separatorDetector.js';
+import { detectSeparatorsBatch } from './ki.js';
 
 export { isSeparator };
 
@@ -18,27 +19,37 @@ function scanDir(folder) {
 }
 
 /**
- * Liest Ordner ein und gibt Gruppen + Separatoren zurück.
- * @returns {{ groups: string[][], separators: string[] }}
+ * Liest Ordner ein, erkennt Separator-Fotos (SKU-Tüten) via OCR und gruppiert die Bilder.
+ * Das Separator-Foto ist das erste Bild der jeweiligen Gruppe (für Gemini-SKU-Erkennung).
+ *
+ * @returns {{ groups: string[][], separators: string[], skus: (string|null)[] }}
  */
 export async function groupImages(inputFolder, separatorKeyword) {
   const files = scanDir(inputFolder);
-  if (files.length === 0) return { groups: [], separators: [] };
+  if (files.length === 0) return { groups: [], separators: [], skus: [] };
+
+  let detected = await detectSeparatorsBatch(files);
+  if (!detected) {
+    detected = await Promise.all(files.map(f => isSeparator(f, separatorKeyword)));
+  }
 
   const groups     = [];
   const separators = [];
-  let current      = [];
+  const skus       = [];
+  let current      = null;
 
-  for (const file of files) {
-    const sep = await isSeparator(file, separatorKeyword);
-    if (sep) {
-      separators.push(file);
-      if (current.length > 0) { groups.push(current); current = []; }
+  for (let i = 0; i < files.length; i++) {
+    const { isSeparator: isSep, sku } = detected[i];
+    if (isSep) {
+      current = [files[i]];
+      groups.push(current);
+      separators.push(files[i]);
+      skus.push(sku);
     } else {
-      current.push(file);
+      if (!current) { current = []; groups.push(current); }
+      current.push(files[i]);
     }
   }
 
-  if (current.length > 0) groups.push(current);
-  return { groups, separators };
+  return { groups, separators, skus };
 }

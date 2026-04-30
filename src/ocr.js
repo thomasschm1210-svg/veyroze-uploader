@@ -55,6 +55,27 @@ export async function extractText(imagePath) {
   }
 }
 
+// Lightweight: prüft ob ein Bild eine 5-stellige SKU-Nummer enthält (Separator-Erkennung)
+export async function detectSkuNumber(imagePath) {
+  const tmpPath = path.join(os.tmpdir(), `sku_${path.basename(imagePath)}.png`);
+  try {
+    await sharp(imagePath)
+      .resize({ width: 600, withoutEnlargement: true })
+      .grayscale()
+      .normalise()
+      .png()
+      .toFile(tmpPath);
+    const w = await getWorker();
+    const { data: { text } } = await w.recognize(tmpPath);
+    const match = text.match(/\b(\d{5})\b/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  } finally {
+    if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+  }
+}
+
 // Extrahiert Text aus bis zu 3 Bildern einer Gruppe (Token-Sparsamkeit)
 export async function extractGroupText(imageFiles) {
   const results = [];

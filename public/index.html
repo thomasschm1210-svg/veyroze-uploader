@@ -277,14 +277,18 @@
       display: block;
     }
     .thumb-remove {
-      position: absolute; top: -6px; right: -6px;
+      position: absolute; top: 4px; right: 4px;
       width: 20px; height: 20px;
-      background: var(--red); color: #fff;
-      border: none; border-radius: 50%;
-      font-size: 12px; line-height: 20px; text-align: center;
+      background: rgba(0,0,0,0.65); color: #fff;
+      border: 1.5px solid rgba(255,255,255,0.35); border-radius: 50%;
+      font-size: 13px; line-height: 1; text-align: center;
       cursor: pointer; font-weight: 700;
       display: flex; align-items: center; justify-content: center;
+      opacity: 0; transition: opacity .15s ease;
+      backdrop-filter: blur(4px);
     }
+    .thumb-wrap:hover .thumb-remove { opacity: 1; }
+    @media (pointer: coarse) { .thumb-remove { opacity: 1; } }
     .thumb-handle {
       position: absolute; bottom: 0; left: 0; right: 0;
       height: 18px;
@@ -358,6 +362,52 @@
       z-index: 50;
     }
     .new-product-bar .btn { padding: 10px 18px; font-size: 13.5px; }
+
+    /* ── Batch Mode ──────────────────────────── */
+    .mode-toggle {
+      display: flex; gap: 4px;
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 4px;
+      margin-bottom: 24px;
+    }
+    .mode-btn {
+      flex: 1; padding: 9px 16px;
+      border-radius: 8px;
+      font-size: 13.5px; font-weight: 500;
+      color: var(--text-2);
+      transition: all .18s ease;
+    }
+    .mode-btn.active {
+      background: var(--bg-4);
+      color: var(--text-0);
+      border: 1px solid var(--border-h);
+    }
+    .batch-hint {
+      background: rgba(10,132,255,0.07);
+      border: 1px solid rgba(10,132,255,0.18);
+      border-radius: var(--radius);
+      padding: 14px 18px;
+      margin-bottom: 24px;
+      font-size: 13.5px;
+      color: var(--text-1);
+      line-height: 1.5;
+    }
+    .batch-flat-strip {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      padding: 14px 0;
+    }
+    .batch-flat-strip img {
+      width: 72px; height: 72px;
+      object-fit: cover;
+      border-radius: var(--radius-sm);
+      background: var(--bg-3);
+    }
+    .batch-count {
+      font-size: 13px; color: var(--text-2);
+      text-align: center; padding: 8px 0;
+    }
 
     /* ── Progress ────────────────────────────── */
     .overall-card {
@@ -720,6 +770,33 @@
       border-top: 1px solid var(--border); flex-shrink: 0;
     }
     .modal-footer .btn { flex: 1; }
+    /* ── Drop overlay ────────────────────────────── */
+    #dropOverlay {
+      display: none; position: fixed; inset: 0; z-index: 90;
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      align-items: center; justify-content: center;
+      pointer-events: none;
+    }
+    #dropOverlay.active { display: flex; }
+    .drop-inner {
+      border: 2px dashed rgba(255,255,255,0.3);
+      border-radius: var(--radius);
+      padding: 44px 72px;
+      text-align: center;
+    }
+    .drop-inner .drop-icon {
+      font-size: 38px; margin-bottom: 12px; color: var(--text-0);
+    }
+    .drop-inner p {
+      font-size: 16px; font-weight: 500;
+      color: var(--text-0); letter-spacing: -0.01em;
+    }
+    .drop-inner span {
+      font-size: 13px; color: var(--text-2); margin-top: 6px; display: block;
+    }
+
     .ki-card { cursor: pointer; }
     .ki-card-arrow {
       margin-left: auto; color: var(--text-3); font-size: 16px;
@@ -752,6 +829,15 @@
           <p class="page-sub">Add photos for each product. AI will detect brand, size, and condition automatically.</p>
         </div>
 
+        <div class="mode-toggle">
+          <button class="mode-btn" id="modeManual" onclick="setBatchMode(false)">Manual</button>
+          <button class="mode-btn" id="modeBatch" onclick="setBatchMode(true)">Batch</button>
+        </div>
+
+        <div class="batch-hint" id="batchHint" style="display:none">
+          Upload all photos at once. SKU bag photos (5-digit number) automatically separate products.
+        </div>
+
         <div class="capture-actions">
           <button class="btn btn-secondary" onclick="openCamera()">Take photo</button>
           <button class="btn btn-secondary" onclick="openGallery()">Choose from gallery</button>
@@ -762,7 +848,7 @@
         <div class="groups-area" id="groupsArea">
           <div class="empty-state" id="emptyState">
             <div class="icon">+</div>
-            <p>No photos yet.<br>Tap <strong>Take photo</strong> or <strong>Choose from gallery</strong> to start.</p>
+            <p>No photos yet.<br>Tap <strong>Take photo</strong>, <strong>Choose from gallery</strong>, or <strong>drag &amp; drop</strong> images here.</p>
           </div>
         </div>
       </div>
@@ -771,7 +857,7 @@
         <button class="btn-clear-all" onclick="confirmClearAll()">× Clear all</button>
       </div>
       <div class="new-product-bar" id="newProductBar" style="display:none">
-        <button class="btn btn-secondary" onclick="addNewProduct()">+ Product</button>
+        <button class="btn btn-secondary" id="addProductBtn" onclick="addNewProduct()">+ Product</button>
         <button class="btn btn-secondary" id="plugToggle" onclick="togglePlug()" title="Plug = taxable, Standard = diff">Standard</button>
         <button class="btn btn-primary" id="startBtn" onclick="startUpload()">Start upload →</button>
       </div>
@@ -840,6 +926,15 @@
   </main>
 </div>
 
+<!-- ── Drop Overlay ───────────────────────────────────────────────────────── -->
+<div id="dropOverlay">
+  <div class="drop-inner">
+    <div class="drop-icon">↓</div>
+    <p>Drop photos here</p>
+    <span>They'll be added to the active product</span>
+  </div>
+</div>
+
 <!-- ── Product Detail Modal ──────────────────────────────────────────────── -->
 <div class="modal-overlay" id="modalOverlay" onclick="handleOverlayClick(event)">
   <div class="modal" id="modal">
@@ -884,8 +979,8 @@
           <input type="text" id="m-sku" placeholder="Nummer vom Tütchen">
         </div>
         <div class="modal-field">
-          <label>Country of origin</label>
-          <input type="text" id="m-country" placeholder="Mexico">
+          <label>Herkunftsland</label>
+          <input type="text" id="m-country" placeholder="Mexiko">
         </div>
         <div class="modal-field">
           <label>Length (cm)</label>
@@ -923,6 +1018,7 @@ let activeGroup = 0;
 let runId       = null;
 let allProducts = [];
 let isPlug      = false;
+let batchMode   = localStorage.getItem('veyroze_batchMode') === 'true';
 
 function togglePlug() {
   isPlug = !isPlug;
@@ -931,6 +1027,26 @@ function togglePlug() {
   btn.style.background    = isPlug ? 'rgba(255,159,10,0.15)' : '';
   btn.style.borderColor   = isPlug ? 'rgba(255,159,10,0.4)'  : '';
   btn.style.color         = isPlug ? 'var(--yellow)'          : '';
+}
+
+function setBatchMode(b) {
+  if (batchMode === b) return;
+  batchMode = b;
+  localStorage.setItem('veyroze_batchMode', b);
+  if (b && groups.length > 1) {
+    groups = [groups.flat()];
+    activeGroup = 0;
+  }
+  renderCaptureMode();
+  renderGroups();
+}
+
+function renderCaptureMode() {
+  document.getElementById('modeManual').classList.toggle('active', !batchMode);
+  document.getElementById('modeBatch').classList.toggle('active', batchMode);
+  document.getElementById('batchHint').style.display = batchMode ? 'block' : 'none';
+  const addBtn = document.getElementById('addProductBtn');
+  if (addBtn) addBtn.style.display = batchMode ? 'none' : '';
 }
 
 const PHASES = ['Duplikate', 'Komprimieren', 'Analyse', 'KI-Analyse'];
@@ -1051,24 +1167,48 @@ async function restoreState() {
 
 async function addFiles(files) {
   if (!files?.length) return;
-  const idx    = activeGroupIdx();
-  const before = groups[idx].length;
+  const idx = batchMode ? 0 : activeGroupIdx();
+  if (batchMode && groups.length !== 1) { groups = [[]]; activeGroup = 0; }
   for (const f of files) {
     groups[idx].push({ blob: f, url: URL.createObjectURL(f), name: f.name || 'photo.jpg' });
   }
   await saveState();
   renderGroups();
   document.getElementById('galleryInput').value = '';
-  const after = groups[idx].length;
-  const added = after - before;
-  setTimeout(() => {
-    const cards = document.querySelectorAll('#groupsArea .product-card');
-    cards[idx]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, 50);
+  if (!batchMode) {
+    setTimeout(() => {
+      const cards = document.querySelectorAll('#groupsArea .product-card');
+      cards[idx]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 50);
+  }
 }
 
-// Show lock screen if ACCESS_TOKEN is configured server-side
 restoreState();
+renderCaptureMode();
+
+// ── Drag & Drop file import ───────────────────────────────────────────────────
+(function setupDropZone() {
+  const screen  = document.getElementById('screen-capture');
+  const overlay = document.getElementById('dropOverlay');
+
+  screen.addEventListener('dragover', e => {
+    if (!e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    overlay.classList.add('active');
+  });
+
+  screen.addEventListener('dragleave', e => {
+    if (e.relatedTarget && screen.contains(e.relatedTarget)) return;
+    overlay.classList.remove('active');
+  });
+
+  screen.addEventListener('drop', e => {
+    e.preventDefault();
+    overlay.classList.remove('active');
+    const files = e.dataTransfer.files;
+    if (files?.length) addFiles(files);
+  });
+})();
 
 function addNewProduct() {
   while (groups.length > 1 && groups[groups.length - 1].length === 0) groups.pop();
@@ -1105,6 +1245,24 @@ function renderGroups() {
   area.innerHTML = '';
   bar.style.display = 'flex';
   clearBar.style.display = 'block';
+
+  if (batchMode) {
+    const allItems = groups.flat();
+    const strip = document.createElement('div');
+    strip.className = 'batch-flat-strip';
+    allItems.forEach(item => {
+      const img = document.createElement('img');
+      img.src = item.url; img.loading = 'lazy';
+      strip.appendChild(img);
+    });
+    const count = document.createElement('div');
+    count.className = 'batch-count';
+    count.textContent = `${allItems.length} photo${allItems.length !== 1 ? 's' : ''} · separators auto-detected`;
+    area.appendChild(strip);
+    area.appendChild(count);
+    saveState().catch(() => {});
+    return;
+  }
 
   groups.forEach((grp, gi) => {
     const card   = document.createElement('div');
@@ -1270,15 +1428,21 @@ async function startUpload() {
   setOverall(15);
   document.getElementById('overallLabel').textContent = 'Pipeline running';
 
-  let flatIdx = 0;
-  const serverGroups = groups.map(grp => grp.map(() => uploadedFiles[flatIdx++]));
-
   startSSE();
+
+  let runBody;
+  if (batchMode) {
+    runBody = { runId, folderName: isPlug ? 'Plug' : '' };
+  } else {
+    let flatIdx = 0;
+    const serverGroups = groups.map(grp => grp.map(() => uploadedFiles[flatIdx++]));
+    runBody = { runId, groups: serverGroups, folderName: isPlug ? 'Plug' : '' };
+  }
 
   await fetch('/api/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ runId, groups: serverGroups, folderName: isPlug ? 'Plug' : '' }),
+    body: JSON.stringify(runBody),
   });
 }
 
@@ -1502,6 +1666,47 @@ function renderKiCard(p, idx, container) {
 
 let currentModalIdx = null;
 
+const COUNTRY_DE = {
+  'afghanistan': 'Afghanistan', 'albania': 'Albanien', 'algeria': 'Algerien',
+  'argentina': 'Argentinien', 'australia': 'Australien', 'austria': 'Österreich',
+  'bangladesh': 'Bangladesch', 'belgium': 'Belgien', 'bolivia': 'Bolivien',
+  'brazil': 'Brasilien', 'bulgaria': 'Bulgarien', 'cambodia': 'Kambodscha',
+  'canada': 'Kanada', 'chile': 'Chile', 'china': 'China', 'colombia': 'Kolumbien',
+  'croatia': 'Kroatien', 'czechia': 'Tschechien', 'czech republic': 'Tschechien',
+  'denmark': 'Dänemark', 'egypt': 'Ägypten', 'ethiopia': 'Äthiopien',
+  'finland': 'Finnland', 'france': 'Frankreich', 'germany': 'Deutschland',
+  'ghana': 'Ghana', 'greece': 'Griechenland', 'guatemala': 'Guatemala',
+  'honduras': 'Honduras', 'hungary': 'Ungarn', 'india': 'Indien',
+  'indonesia': 'Indonesien', 'iran': 'Iran', 'iraq': 'Irak',
+  'ireland': 'Irland', 'israel': 'Israel', 'italy': 'Italien',
+  'ivory coast': 'Elfenbeinküste', 'japan': 'Japan', 'jordan': 'Jordanien',
+  'kenya': 'Kenia', 'korea': 'Korea', 'south korea': 'Südkorea',
+  'kosovo': 'Kosovo', 'laos': 'Laos', 'latvia': 'Lettland',
+  'lebanon': 'Libanon', 'lithuania': 'Litauen', 'madagascar': 'Madagaskar',
+  'malaysia': 'Malaysia', 'mali': 'Mali', 'mauritius': 'Mauritius',
+  'mexico': 'Mexiko', 'moldova': 'Moldau', 'morocco': 'Marokko',
+  'myanmar': 'Myanmar', 'netherlands': 'Niederlande', 'new zealand': 'Neuseeland',
+  'nicaragua': 'Nicaragua', 'nigeria': 'Nigeria', 'north korea': 'Nordkorea',
+  'norway': 'Norwegen', 'pakistan': 'Pakistan', 'peru': 'Peru',
+  'philippines': 'Philippinen', 'poland': 'Polen', 'portugal': 'Portugal',
+  'romania': 'Rumänien', 'russia': 'Russland', 'saudi arabia': 'Saudi-Arabien',
+  'senegal': 'Senegal', 'serbia': 'Serbien', 'slovakia': 'Slowakei',
+  'slovenia': 'Slowenien', 'south africa': 'Südafrika', 'spain': 'Spanien',
+  'sri lanka': 'Sri Lanka', 'sweden': 'Schweden', 'switzerland': 'Schweiz',
+  'syria': 'Syrien', 'taiwan': 'Taiwan', 'tanzania': 'Tansania',
+  'thailand': 'Thailand', 'tunisia': 'Tunesien', 'turkey': 'Türkei',
+  'ukraine': 'Ukraine', 'united kingdom': 'Vereinigtes Königreich', 'uk': 'Vereinigtes Königreich',
+  'united states': 'USA', 'usa': 'USA', 'u.s.a.': 'USA', 'us': 'USA',
+  'uruguay': 'Uruguay', 'uzbekistan': 'Usbekistan', 'venezuela': 'Venezuela',
+  'vietnam': 'Vietnam', 'yemen': 'Jemen', 'zimbabwe': 'Simbabwe',
+};
+
+function toGermanCountry(raw) {
+  if (!raw) return raw;
+  const key = raw.toLowerCase().replace(/^made\s+in\s+/i, '').trim();
+  return COUNTRY_DE[key] || raw;
+}
+
 function openProductModal(idx) {
   const p  = allProducts[idx];
   const ki = p.ki || {};
@@ -1516,7 +1721,7 @@ function openProductModal(idx) {
   document.getElementById('m-condition').value  = ki.condition || ki.zustand || '';
   document.getElementById('m-wash').value       = ki.wash_details || '';
   document.getElementById('m-sku').value        = ki.sku || '';
-  document.getElementById('m-country').value    = ki.country_of_origin || '';
+  document.getElementById('m-country').value    = toGermanCountry(ki.country_of_origin) || '';
   document.getElementById('m-len').value        = ki.measurements?.length_cm || '';
   document.getElementById('m-waist').value      = ki.measurements?.waist_cm || '';
   document.getElementById('m-legopening').value = ki.measurements?.leg_opening_cm || '';
