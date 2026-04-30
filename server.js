@@ -19,6 +19,7 @@ const app = express();
 app.use(securityHeaders());
 app.use(express.static(PUBLIC_DIR));
 
+
 // ── SSE clients keyed by runId ──────────────────────────────────────────────
 const sseClients = new Map();
 
@@ -88,7 +89,7 @@ app.post('/api/run', express.json(), async (req, res) => {
   const secHttp = await securityCheck({ phase: 'http', ip: req.ip });
   if (secHttp.block) return res.status(secHttp.status).json(secHttp.body);
 
-  const { runId, groups: rawGroups } = req.body;
+  const { runId, groups: rawGroups, folderName } = req.body;
   if (!runId) return res.status(400).json({ error: 'runId fehlt' });
 
   const runDir = path.join(UPLOAD_DIR, runId);
@@ -146,6 +147,7 @@ app.post('/api/run', express.json(), async (req, res) => {
     const result = await runPipeline(groups, runDir, {
       separators: [],
       ProgressClass: MobileProgress,
+      folderName: folderName || '',
     });
 
     const csvRel = result.csvPath
@@ -158,6 +160,9 @@ app.post('/api/run', express.json(), async (req, res) => {
       thumbnail: p.thumbnail && fs.existsSync(p.thumbnail)
         ? `/api/image/${runId}/${path.relative(runDir, p.thumbnail)}`
         : null,
+      images: (p.images || []).filter(f => fs.existsSync(f)).map(f =>
+        `/api/image/${runId}/${path.relative(runDir, f)}`
+      ),
     }));
 
     sendEvent(runId, 'done', { csvUrl: csvRel, stats: result.stats, products });

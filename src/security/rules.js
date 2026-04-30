@@ -7,7 +7,7 @@ export const RULES = {
   rateLimit: {
     windowMs:              60_000,
     maxRequestsPerWindow:  30,
-    maxKiCallsPerHour:     100,
+    maxKiCallsPerDay:      200,
   },
   promptInjection: {
     forbiddenPatterns: [
@@ -25,9 +25,10 @@ export const RULES = {
     forbiddenSegments: ['..', '~', '%2e%2e', '%252e', '\0'],
   },
   headers: {
-    'X-Content-Type-Options': 'nosniff',
-    'X-Frame-Options':        'DENY',
-    'X-XSS-Protection':       '1; mode=block',
-    'Referrer-Policy':        'no-referrer',
+    'X-Content-Type-Options':  'nosniff',
+    'X-Frame-Options':         'DENY',
+    'X-XSS-Protection':        '1; mode=block',
+    'Referrer-Policy':         'no-referrer',
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'",
   },
 };

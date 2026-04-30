@@ -1,9 +1,16 @@
 import fs from 'fs';
 import { RULES } from './rules.js';
-import { validateImageFile, validateImagePath, scanForPromptInjection, checkRateLimit, mimeFromPath } from './technicals.js';
+import { validateImageFile, validateImagePath, scanForPromptInjection, checkRateLimit, checkKiBudget, validateAccessToken, mimeFromPath } from './technicals.js';
 import { UI } from './design.js';
 
 export async function securityCheck(ctx) {
+  if (ctx.phase === 'auth') {
+    if (!validateAccessToken(ctx.token)) {
+      return { block: true, status: 401, body: { error: 'Unauthorized' } };
+    }
+    return { block: false };
+  }
+
   if (ctx.phase === 'http') {
     if (ctx.path !== undefined && !validateImagePath(ctx.path)) {
       return { block: true, status: 403, body: UI.errorResponse('PATH_TRAVERSAL', UI.errors.pathTraversal) };
@@ -37,6 +44,10 @@ export async function securityCheck(ctx) {
   }
 
   if (ctx.phase === 'ki') {
+    const budget = checkKiBudget();
+    if (!budget.allowed) {
+      return { block: true, status: 429, body: UI.errorResponse('KI_BUDGET', 'Tägliches KI-Limit erreicht. Versuche es morgen erneut.') };
+    }
     const scan = scanForPromptInjection(ctx.ocrText);
     if (!scan.safe) {
       return { block: true, status: 422, body: UI.errorResponse('PROMPT_INJECTION', UI.errors.promptInjection) };

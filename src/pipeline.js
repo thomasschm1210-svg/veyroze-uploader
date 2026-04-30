@@ -153,11 +153,13 @@ export async function runPipeline(groups, baseDir, opts = {}) {
       continue;
     }
 
-    const ki = await mockKiAnalyze(r.finalPaths);
+    const ki = await mockKiAnalyze(r.finalPaths, { folderName: opts.folderName || '' });
+    const productImages = ki.product_images?.length ? ki.product_images : r.finalPaths;
     products.push({
       index:     r.groupIndex,
       label:     r.groupLabel,
-      thumbnail: r.finalPaths[0] || null,
+      thumbnail: productImages[0] || null,
+      images:    productImages,
       ki,
       isReview:  r.isLowConfidence,
     });

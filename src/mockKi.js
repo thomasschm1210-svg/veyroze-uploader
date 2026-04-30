@@ -33,7 +33,8 @@ export async function mockKiAnalyze(imageFiles) {
   const pick = pool[Math.floor(Math.random() * pool.length)];
 
   const markePrefix = (pick.marke && pick.marke !== 'Unbekannt') ? pick.marke + ' ' : '';
-  const beschreibung = `Material: ${pick.material}\nCondition: sehr gut 🧼\n\nDetails: ${pick.details.join(', ')}\n\nEach piece carries its own story — delivered clean and ready to wear.`;
+  const beschreibung = `Material: ${pick.material}\nCondition: sehr gut 🧼\n\nDetails: ${pick.details.join(', ')}\n\nMeasurements:\n  Length: —cm\n  Shoulder width: —cm\n  Bottom width: —cm\n\nEach piece carries its own story — delivered clean and ready to wear.`;
+  const collectionMap = { Jeans: 'Jeans', Jacke: 'Jackets', Boot: 'Boots', Shirt: 'Shirts' };
   return {
     produkttyp:      pick.typ,
     marke:           pick.marke,
@@ -44,6 +45,7 @@ export async function mockKiAnalyze(imageFiles) {
     zustand:         'sehr gut',
     details:         pick.details,
     beschreibung,
+    collection:      collectionMap[pick.typ] || 'Vintage',
     titel_vorschlag: `${markePrefix}${pick.stil} ${pick.typ} ${pick.farbe} (${pick.groesse})`.trim(),
     suggested_price: pick.preis,
     konfidenz:       'mittel',

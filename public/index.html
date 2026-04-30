@@ -678,7 +678,20 @@
     .modal-thumb-strip img {
       width: 80px; height: 100px; object-fit: cover;
       border-radius: var(--radius-sm); flex-shrink: 0;
-      background: var(--bg-3);
+      background: var(--bg-3); cursor: pointer;
+      opacity: 0.5; transition: opacity .15s, outline .15s;
+      outline: 2px solid transparent;
+    }
+    .modal-thumb-strip img.cover {
+      opacity: 1; outline: 2px solid #fff;
+    }
+    .modal-warn {
+      margin: 0 20px 16px;
+      padding: 10px 14px;
+      background: rgba(255,159,10,0.1);
+      border: 1px solid rgba(255,159,10,0.3);
+      border-radius: var(--radius-sm);
+      font-size: 12.5px; color: var(--yellow);
     }
     .modal-body { overflow-y: auto; padding: 20px; flex: 1; }
     .modal-fields {
@@ -759,6 +772,7 @@
       </div>
       <div class="new-product-bar" id="newProductBar" style="display:none">
         <button class="btn btn-secondary" onclick="addNewProduct()">+ Product</button>
+        <button class="btn btn-secondary" id="plugToggle" onclick="togglePlug()" title="Plug = taxable, Standard = diff">Standard</button>
         <button class="btn btn-primary" id="startBtn" onclick="startUpload()">Start upload →</button>
       </div>
     </div>
@@ -797,6 +811,9 @@
         <button class="btn btn-success btn-block" id="btnShopifyAll" onclick="shopifyAll()">
           Push all to Shopify
         </button>
+        <a class="btn btn-secondary btn-block" id="btnCsv" style="margin-top:10px;display:none;text-align:center;text-decoration:none" download>
+          Download CSV
+        </a>
         <button class="btn btn-secondary btn-block" style="margin-top:10px" onclick="resetAll()">
           Start a new run
         </button>
@@ -831,47 +848,64 @@
       <button class="modal-close" onclick="closeModal()">×</button>
     </div>
     <div class="modal-thumb-strip" id="modalThumbStrip"></div>
+    <div class="modal-warn" id="modalWarn" style="display:none">Low AI confidence — please review all fields carefully.</div>
     <div class="modal-body">
       <div class="modal-fields">
         <div class="modal-field full">
           <label>Title</label>
-          <input type="text" id="m-title" placeholder="Shopify product title">
-        </div>
-        <div class="modal-field">
-          <label>Price (€)</label>
-          <input type="number" id="m-price" step="0.10" min="0" placeholder="44.90">
+          <input type="text" id="m-title" placeholder="Levi's 512 bootcut Jeans (W30/L34)">
         </div>
         <div class="modal-field">
           <label>Brand</label>
           <input type="text" id="m-brand" placeholder="Levi's">
         </div>
         <div class="modal-field">
-          <label>Type</label>
-          <input type="text" id="m-type" placeholder="Jeans">
+          <label>Model</label>
+          <input type="text" id="m-model" placeholder="512">
         </div>
         <div class="modal-field">
-          <label>Style</label>
-          <input type="text" id="m-style" placeholder="Bootcut">
+          <label>Fit</label>
+          <input type="text" id="m-fit" placeholder="bootcut">
         </div>
         <div class="modal-field">
-          <label>Color</label>
-          <input type="text" id="m-color" placeholder="Blau">
+          <label>Size (label)</label>
+          <input type="text" id="m-size" placeholder="W30/L34">
         </div>
         <div class="modal-field">
-          <label>Material</label>
-          <input type="text" id="m-material" placeholder="Denim">
+          <label>Condition</label>
+          <input type="text" id="m-condition" placeholder="top">
         </div>
         <div class="modal-field">
-          <label>Size</label>
-          <input type="text" id="m-size" placeholder="W33/L32">
+          <label>Wash details</label>
+          <input type="text" id="m-wash" placeholder="cool denim wash">
+        </div>
+        <div class="modal-field">
+          <label>SKU</label>
+          <input type="text" id="m-sku" placeholder="Nummer vom Tütchen">
+        </div>
+        <div class="modal-field">
+          <label>Country of origin</label>
+          <input type="text" id="m-country" placeholder="Mexico">
+        </div>
+        <div class="modal-field">
+          <label>Length (cm)</label>
+          <input type="number" id="m-len" placeholder="98">
+        </div>
+        <div class="modal-field">
+          <label>Waist (cm)</label>
+          <input type="number" id="m-waist" placeholder="42">
+        </div>
+        <div class="modal-field">
+          <label>Leg opening (cm)</label>
+          <input type="number" id="m-legopening" placeholder="20">
         </div>
         <div class="modal-field full">
-          <label>Condition</label>
-          <input type="text" id="m-condition" placeholder="sehr gut">
+          <label>Tags</label>
+          <input type="text" id="m-tags" placeholder="KI, diff, W30/L34">
         </div>
         <div class="modal-field full">
           <label>Description</label>
-          <textarea id="m-desc" placeholder="Material: …&#10;Condition: …&#10;&#10;Details: …"></textarea>
+          <textarea id="m-desc" placeholder="Levi's 512   Size: W30/L34 🩻&#10;&#10;Details: …&#10;Condition: …&#10;Fit: …&#10;&#10;Measurements 📏:&#10;Length: — cm"></textarea>
         </div>
       </div>
     </div>
@@ -888,6 +922,16 @@ let groups      = [[]];
 let activeGroup = 0;
 let runId       = null;
 let allProducts = [];
+let isPlug      = false;
+
+function togglePlug() {
+  isPlug = !isPlug;
+  const btn = document.getElementById('plugToggle');
+  btn.textContent = isPlug ? 'Plug' : 'Standard';
+  btn.style.background    = isPlug ? 'rgba(255,159,10,0.15)' : '';
+  btn.style.borderColor   = isPlug ? 'rgba(255,159,10,0.4)'  : '';
+  btn.style.color         = isPlug ? 'var(--yellow)'          : '';
+}
 
 const PHASES = ['Duplikate', 'Komprimieren', 'Analyse', 'KI-Analyse'];
 const PHASE_LABELS = {
@@ -959,26 +1003,48 @@ async function saveState() {
   } catch(e) { console.error('saveState:', e); }
 }
 
+async function saveProductsState() {
+  if (_restoring || !allProducts.length) return;
+  try {
+    const db = await getDB();
+    const tx = db.transaction('state', 'readwrite');
+    tx.objectStore('state').put({ key: 'products', data: allProducts, csvUrl: _csvUrl });
+    await new Promise((r, j) => { tx.oncomplete = r; tx.onerror = j; });
+  } catch(e) { console.error('saveProductsState:', e); }
+}
+
 async function restoreState() {
   _restoring = true;
   try {
     const db  = await getDB();
-    const rec = await new Promise((r, j) => {
-      const tx  = db.transaction('state', 'readonly');
-      const req = tx.objectStore('state').get('session');
+    const idbGet = key => new Promise((r, j) => {
+      const req = db.transaction('state', 'readonly').objectStore('state').get(key);
       req.onsuccess = () => r(req.result);
       req.onerror   = j;
     });
-    if (!rec?.data) return;
-    groups = rec.data.map(grp =>
-      grp.map(item => {
-        const blob = new Blob([item.buf], { type: item.type });
-        return { blob, url: URL.createObjectURL(blob), name: item.name };
-      })
-    );
-    if (!groups.length) groups = [[]];
-    activeGroup = Math.min(rec.activeGroup || 0, groups.length - 1);
-    renderGroups();
+
+    const rec = await idbGet('session');
+    if (rec?.data) {
+      groups = rec.data.map(grp =>
+        grp.map(item => {
+          const blob = new Blob([item.buf], { type: item.type });
+          return { blob, url: URL.createObjectURL(blob), name: item.name };
+        })
+      );
+      if (!groups.length) groups = [[]];
+      activeGroup = Math.min(rec.activeGroup || 0, groups.length - 1);
+      renderGroups();
+    }
+
+    try {
+      const prec = await idbGet('products');
+      if (prec?.data?.length) {
+        _restoring = false;
+        showProducts({ products: prec.data, stats: {}, csvUrl: prec.csvUrl });
+        return;
+      }
+    } catch(e) { console.error('restoreProducts:', e); }
+
   } catch(e) { console.error('restoreState:', e); }
   finally { _restoring = false; }
 }
@@ -1001,6 +1067,7 @@ async function addFiles(files) {
   }, 50);
 }
 
+// Show lock screen if ACCESS_TOKEN is configured server-side
 restoreState();
 
 function addNewProduct() {
@@ -1211,7 +1278,7 @@ async function startUpload() {
   await fetch('/api/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ runId, groups: serverGroups }),
+    body: JSON.stringify({ runId, groups: serverGroups, folderName: isPlug ? 'Plug' : '' }),
   });
 }
 
@@ -1309,14 +1376,22 @@ function setOverall(pct) {
 // ── Products screen ──────────────────────────────────────────────────────────
 let currentFilter = 'all';
 let _stats = {};
+let _csvUrl = null;
 
 function showProducts({ products, stats, csvUrl }) {
   allProducts = products || [];
   _stats = stats || {};
+  _csvUrl = csvUrl || null;
   currentFilter = 'all';
   showScreen('screen-products');
+
+  const btnCsv = document.getElementById('btnCsv');
+  if (_csvUrl) { btnCsv.href = _csvUrl; btnCsv.style.display = ''; }
+  else btnCsv.style.display = 'none';
+
   renderSummary();
   renderFilteredList();
+  saveProductsState();
 }
 
 function renderSummary() {
@@ -1383,31 +1458,41 @@ function renderKiCard(p, idx, container) {
     ? `<img class="ki-thumb" src="${p.thumbnail}" loading="lazy" onerror="this.style.display='none'">`
     : `<div class="ki-thumb-placeholder">·</div>`;
 
-  const typ   = ki.produkttyp || '—';
-  const marke = ki.marke || 'Unknown';
-  const farbe = ki.farbe || '';
-  const size  = ki.groesse || '';
-  const stil  = ki.stil || '';
-  const mat   = ki.material || '';
-  const cond  = ki.zustand || '';
-  const title = ki.titel_vorschlag || '—';
-  const price = ki.suggested_price ? `€${ki.suggested_price.toFixed(2)}` : '';
+  const marke  = ki.marke || 'Unknown';
+  const modell = ki.modell || '';
+  const fit    = ki.fit || '';
+  const size   = ki.size_corrected || ki.groesse || '';
+  const cond   = ki.condition || ki.zustand || '';
+  const title  = ki.titel_vorschlag || '—';
+  const tags   = Array.isArray(ki.tags) ? ki.tags.join(', ') : (ki.tags || '');
+  const weight = ki.shipping_weight_kg ? `${ki.shipping_weight_kg} kg` : '';
+  const sku    = ki.sku ? `SKU: ${ki.sku}` : '';
+  const m      = ki.measurements || {};
+  const measStr = [
+    m.length_cm    ? `L: ${m.length_cm}cm` : null,
+    m.waist_cm     ? `W: ${m.waist_cm}cm`  : null,
+    m.leg_opening_cm ? `O: ${m.leg_opening_cm}cm` : null,
+  ].filter(Boolean).join(' · ');
   const badgeCls  = p.isReview ? 'ki-badge-review' : 'ki-badge-ok';
   const badgeText = p.isReview ? 'Review' : 'OK';
+  const taxBadge  = ki.taxable
+    ? `<span class="ki-badge" style="background:rgba(255,159,10,0.12);color:var(--yellow)">PLUG</span>`
+    : `<span class="ki-badge" style="background:var(--bg-3);color:var(--text-2)">diff</span>`;
 
   card.innerHTML = `
     <div class="ki-card-top">
       ${thumbHtml}
       <div class="ki-meta">
         <div class="ki-badge-row">
-          <span class="ki-badge ki-badge-type">${typ}</span>
+          <span class="ki-badge ki-badge-type">Jeans</span>
           <span class="ki-badge ${badgeCls}">${badgeText}</span>
+          ${taxBadge}
         </div>
-        <div class="ki-brand">${marke}</div>
-        <div class="ki-detail">${[stil, farbe, mat].filter(Boolean).join(' · ')}</div>
-        ${size ? `<div class="ki-detail">Size: <strong>${size}</strong></div>` : ''}
-        ${cond ? `<div class="ki-detail">Condition: ${cond}</div>` : ''}
-        <div class="ki-detail" style="margin-top:4px;font-size:12px;color:var(--text-2)">${title}${price ? ' · ' + price : ''}</div>
+        <div class="ki-brand">${marke}${modell ? ' ' + modell : ''}</div>
+        <div class="ki-detail">${[fit, size].filter(Boolean).join(' · ')}</div>
+        ${cond ? `<div class="ki-detail">Condition: <strong>${cond}</strong></div>` : ''}
+        ${measStr ? `<div class="ki-detail" style="font-size:12px">${measStr}</div>` : ''}
+        <div class="ki-detail" style="margin-top:4px;font-size:12px;color:var(--text-2)">${[sku, weight, tags].filter(Boolean).join(' · ')}</div>
       </div>
       <span class="ki-card-arrow">›</span>
     </div>`;
@@ -1423,22 +1508,35 @@ function openProductModal(idx) {
   currentModalIdx = idx;
 
   document.getElementById('modalTitle').textContent = `Product ${p.index || idx + 1}`;
-  document.getElementById('m-title').value     = ki.titel_vorschlag || '';
-  document.getElementById('m-price').value     = ki.suggested_price || '';
-  document.getElementById('m-brand').value     = ki.marke || '';
-  document.getElementById('m-type').value      = ki.produkttyp || '';
-  document.getElementById('m-style').value     = ki.stil || '';
-  document.getElementById('m-color').value     = ki.farbe || '';
-  document.getElementById('m-material').value  = ki.material || '';
-  document.getElementById('m-size').value      = ki.groesse || '';
-  document.getElementById('m-condition').value = ki.zustand || '';
-  document.getElementById('m-desc').value      = ki.beschreibung || '';
+  document.getElementById('m-title').value      = ki.titel_vorschlag || '';
+  document.getElementById('m-brand').value      = ki.marke || '';
+  document.getElementById('m-model').value      = ki.modell || '';
+  document.getElementById('m-fit').value        = ki.fit || '';
+  document.getElementById('m-size').value       = ki.size_corrected || ki.groesse || '';
+  document.getElementById('m-condition').value  = ki.condition || ki.zustand || '';
+  document.getElementById('m-wash').value       = ki.wash_details || '';
+  document.getElementById('m-sku').value        = ki.sku || '';
+  document.getElementById('m-country').value    = ki.country_of_origin || '';
+  document.getElementById('m-len').value        = ki.measurements?.length_cm || '';
+  document.getElementById('m-waist').value      = ki.measurements?.waist_cm || '';
+  document.getElementById('m-legopening').value = ki.measurements?.leg_opening_cm || '';
+  document.getElementById('m-tags').value       = Array.isArray(ki.tags) ? ki.tags.join(', ') : (ki.tags || '');
+  document.getElementById('m-desc').value       = ki.beschreibung || '';
 
+  // Confidence warning
+  const warn = document.getElementById('modalWarn');
+  warn.style.display = ki.konfidenz === 'niedrig' ? '' : 'none';
+
+  // All images — click to set cover
+  const coverIdx = p.coverIdx ?? 0;
+  const imgs = (p.images?.length ? p.images : p.thumbnail ? [p.thumbnail] : []);
   const strip = document.getElementById('modalThumbStrip');
-  strip.innerHTML = p.thumbnail
-    ? `<img src="${p.thumbnail}" onerror="this.style.display='none'">`
-    : '';
-  strip.style.display = p.thumbnail ? '' : 'none';
+  strip.innerHTML = imgs.map((src, i) =>
+    `<img src="${src}" class="${i === coverIdx ? 'cover' : ''}"
+      onclick="setCover(${idx}, ${i})"
+      onerror="this.style.display='none'">`
+  ).join('');
+  strip.style.display = imgs.length ? '' : 'none';
 
   const btn = document.getElementById('modalShopifyBtn');
   if (p._shopifyDone) {
@@ -1454,21 +1552,38 @@ function openProductModal(idx) {
   document.getElementById('modalOverlay').classList.add('active');
 }
 
+function setCover(productIdx, imgIdx) {
+  allProducts[productIdx].coverIdx = imgIdx;
+  allProducts[productIdx].thumbnail = (allProducts[productIdx].images || [])[imgIdx] || allProducts[productIdx].thumbnail;
+  document.getElementById('modalThumbStrip').querySelectorAll('img').forEach((el, i) => {
+    el.classList.toggle('cover', i === imgIdx);
+  });
+}
+
 function closeModal() {
   if (currentModalIdx === null) return;
   const idx = currentModalIdx;
   const ki  = allProducts[idx].ki || (allProducts[idx].ki = {});
 
-  ki.titel_vorschlag = document.getElementById('m-title').value;
-  ki.suggested_price = parseFloat(document.getElementById('m-price').value) || 0;
-  ki.marke           = document.getElementById('m-brand').value;
-  ki.produkttyp      = document.getElementById('m-type').value;
-  ki.stil            = document.getElementById('m-style').value;
-  ki.farbe           = document.getElementById('m-color').value;
-  ki.material        = document.getElementById('m-material').value;
-  ki.groesse         = document.getElementById('m-size').value;
-  ki.zustand         = document.getElementById('m-condition').value;
-  ki.beschreibung    = document.getElementById('m-desc').value;
+  ki.titel_vorschlag  = document.getElementById('m-title').value;
+  ki.marke            = document.getElementById('m-brand').value;
+  ki.modell           = document.getElementById('m-model').value;
+  ki.fit              = document.getElementById('m-fit').value;
+  ki.size_corrected   = document.getElementById('m-size').value;
+  ki.groesse          = ki.size_corrected;
+  ki.condition        = document.getElementById('m-condition').value;
+  ki.zustand          = ki.condition;
+  ki.wash_details     = document.getElementById('m-wash').value;
+  ki.sku              = document.getElementById('m-sku').value;
+  ki.country_of_origin = document.getElementById('m-country').value;
+  ki.beschreibung     = document.getElementById('m-desc').value;
+  ki.tags             = document.getElementById('m-tags').value.split(',').map(t => t.trim()).filter(Boolean);
+  ki.measurements     = {
+    length_cm:      parseFloat(document.getElementById('m-len').value)        || null,
+    waist_cm:       parseFloat(document.getElementById('m-waist').value)      || null,
+    leg_opening_cm: parseFloat(document.getElementById('m-legopening').value) || null,
+  };
+  saveProductsState();
 
   // Re-render the card in place
   const list    = document.getElementById('productList');
@@ -1499,9 +1614,10 @@ function shopifySingle(idx) {
   const title = ki.titel_vorschlag || '—';
   const price = ki.suggested_price || '—';
 
+  p._shopifyDone = true;
+  renderSummary();
+
   setTimeout(() => {
-    p._shopifyDone = true;
-    renderSummary();
     const list    = document.getElementById('productList');
     const oldCard = document.getElementById(`ki-card-${idx}`);
     if (oldCard) {
@@ -1575,6 +1691,7 @@ function resetAll() {
   getDB().then(db => {
     const tx = db.transaction('state', 'readwrite');
     tx.objectStore('state').delete('session');
+    tx.objectStore('state').delete('products');
   }).catch(() => {});
   allProducts = [];
   document.getElementById('groupsArea').innerHTML =
