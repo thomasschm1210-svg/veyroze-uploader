@@ -66,7 +66,8 @@
       "Bash(rm -rf /Users/thomas.rssk/Documents/veyroze_uploader/gui)",
       "Bash(rm -f /Users/thomas.rssk/Documents/veyroze_uploader/start-app.command /Users/thomas.rssk/Documents/veyroze_uploader/start.command /Users/thomas.rssk/Documents/veyroze_uploader/start-app.sh /Users/thomas.rssk/Documents/veyroze_uploader/index.html /Users/thomas.rssk/Documents/veyroze_uploader/RELEASE_NOTES.md)",
       "Bash(rm -f /Users/thomas.rssk/Documents/veyroze_uploader/mobile/start-mobile.sh /Users/thomas.rssk/Documents/veyroze_uploader/mobile/debug_upload.mjs)",
-      "Bash(rm -f /Users/thomas.rssk/Documents/veyroze_uploader/src/index.js /Users/thomas.rssk/Documents/veyroze_uploader/src/watcher.js /Users/thomas.rssk/Documents/veyroze_uploader/src/gemini-test.js /Users/thomas.rssk/Documents/veyroze_uploader/src/ollama-test.js /Users/thomas.rssk/Documents/veyroze_uploader/src/ollama-batch.js)"
+      "Bash(rm -f /Users/thomas.rssk/Documents/veyroze_uploader/src/index.js /Users/thomas.rssk/Documents/veyroze_uploader/src/watcher.js /Users/thomas.rssk/Documents/veyroze_uploader/src/gemini-test.js /Users/thomas.rssk/Documents/veyroze_uploader/src/ollama-test.js /Users/thomas.rssk/Documents/veyroze_uploader/src/ollama-batch.js)",
+      "WebFetch(domain:github.com)"
     ],
     "additionalDirectories": [
       "/Users/thomas.rssk/Documents/veyroze_uploader/mobile/public",

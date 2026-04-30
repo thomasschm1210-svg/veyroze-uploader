@@ -79,21 +79,27 @@ function buildJeansDescription(brand, model, sizeW, sizeL, washDetails, conditio
   ].join('\n');
 }
 
-const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash-latest'];
+const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest'];
+const RETRYABLE = new Set([429, 503]);
+const MAX_ATTEMPTS = 3;
 
 async function callGemini(imageParts) {
   for (const modelName of MODELS) {
-    try {
-      const model  = genAI.getGenerativeModel({ model: modelName });
-      const result = await model.generateContent([PROMPT, ...imageParts]);
-      return result.response.text().trim();
-    } catch (err) {
-      const status = err.status ?? err.errorDetails?.[0]?.status;
-      if (status === 503 || status === 429 || status === 404) {
-        await new Promise(r => setTimeout(r, 1000));
-        continue;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const model  = genAI.getGenerativeModel({ model: modelName });
+        const result = await model.generateContent([PROMPT, ...imageParts]);
+        return result.response.text().trim();
+      } catch (err) {
+        const status = err.status;
+        if (status === 404) break;                        // model doesn't exist → next model
+        if (RETRYABLE.has(status) && attempt < MAX_ATTEMPTS) {
+          await new Promise(r => setTimeout(r, attempt * 2000));
+          continue;
+        }
+        if (RETRYABLE.has(status)) break;                // exhausted retries → next model
+        throw err;
       }
-      throw err;
     }
   }
   throw new Error('Alle Gemini-Modelle nicht erreichbar. Bitte später erneut versuchen.');
