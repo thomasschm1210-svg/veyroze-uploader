@@ -330,6 +330,15 @@
     .empty-state p { font-size: 14px; line-height: 1.6; }
     .empty-state strong { color: var(--text-0); font-weight: 500; }
 
+    #groupsArea.drop-over .empty-state {
+      border-color: #0a84ff;
+      background: rgba(10,132,255,0.08);
+    }
+    #groupsArea.drop-over .empty-state .icon {
+      border-color: #0a84ff;
+      color: #0a84ff;
+    }
+
     .clear-bar {
       position: fixed;
       left: 50%; transform: translateX(-50%);
@@ -1183,6 +1192,26 @@ async function addFiles(files) {
   }
 }
 
+// Drag & Drop: Bilder auf die Capture-Seite ziehen
+document.addEventListener('dragover', e => {
+  if (!document.getElementById('screen-capture').classList.contains('active')) return;
+  if (!e.dataTransfer?.types?.includes('Files')) return;
+  e.preventDefault();
+  document.getElementById('groupsArea').classList.add('drop-over');
+});
+document.addEventListener('dragleave', e => {
+  if (!e.relatedTarget) document.getElementById('groupsArea').classList.remove('drop-over');
+});
+document.addEventListener('drop', e => {
+  document.getElementById('groupsArea').classList.remove('drop-over');
+  if (!document.getElementById('screen-capture').classList.contains('active')) return;
+  if (!e.dataTransfer?.types?.includes('Files')) return;
+  e.preventDefault();
+  const files = [...e.dataTransfer.files].filter(f => f.type.startsWith('image/'));
+  if (files.length) addFiles(files);
+});
+
+
 restoreState();
 renderCaptureMode();
 
@@ -1900,7 +1929,7 @@ function resetAll() {
   }).catch(() => {});
   allProducts = [];
   document.getElementById('groupsArea').innerHTML =
-    '<div class="empty-state" id="emptyState"><div class="icon">+</div><p>No photos yet.<br>Tap <strong>Take photo</strong> or <strong>Choose from gallery</strong> to start.</p></div>';
+    '<div class="empty-state" id="emptyState"><div class="icon">+</div><p>No photos yet.<br>Tap <strong>Take photo</strong> or <strong>Choose from gallery</strong> to start,<br>or <strong>drag &amp; drop</strong> photos here.</p></div>';
   document.getElementById('newProductBar').style.display = 'none';
   document.getElementById('clearBar').style.display = 'none';
   document.getElementById('phaseList').innerHTML = '';

@@ -25,7 +25,7 @@ Extract ALL of the following and return ONLY valid JSON, no markdown, no explana
     "waist_cm": 42,
     "leg_opening_cm": 20
   },
-  "country_of_origin": "country from wash care tag, e.g. Mexico, Pakistan, Bangladesh — null if not visible",
+  "country_of_origin": "country from wash care tag in German (e.g. Mexiko, Pakistan, Bangladesch, Indien, China, Türkei) — null if not visible",
   "sku": "5-digit integer or null — ONLY from a handwritten number on a plastic bag. NEVER a printed number. NEVER fewer or more than 5 digits.",
   "confidence": "high | medium | low",
   "utility_image_indices": [2, 4]
@@ -70,6 +70,33 @@ async function toInlinePart(filePath) {
   const ext  = path.extname(filePath).toLowerCase();
   const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
   return { inlineData: { data, mimeType: mime } };
+}
+
+const COUNTRY_DE = {
+  'Afghanistan': 'Afghanistan', 'Albania': 'Albanien', 'Algeria': 'Algerien',
+  'Bangladesh': 'Bangladesch', 'Belgium': 'Belgien', 'Bolivia': 'Bolivien',
+  'Brazil': 'Brasilien', 'Bulgaria': 'Bulgarien', 'Cambodia': 'Kambodscha',
+  'China': 'China', 'Colombia': 'Kolumbien', 'Croatia': 'Kroatien',
+  'Czech Republic': 'Tschechien', 'Egypt': 'Ägypten', 'Ethiopia': 'Äthiopien',
+  'France': 'Frankreich', 'Germany': 'Deutschland', 'Greece': 'Griechenland',
+  'Hungary': 'Ungarn', 'India': 'Indien', 'Indonesia': 'Indonesien',
+  'Iran': 'Iran', 'Italy': 'Italien', 'Japan': 'Japan',
+  'Jordan': 'Jordanien', 'Kenya': 'Kenia', 'Madagascar': 'Madagaskar',
+  'Malaysia': 'Malaysia', 'Mexico': 'Mexiko', 'Morocco': 'Marokko',
+  'Myanmar': 'Myanmar', 'Netherlands': 'Niederlande', 'Nigeria': 'Nigeria',
+  'Pakistan': 'Pakistan', 'Peru': 'Peru', 'Philippines': 'Philippinen',
+  'Poland': 'Polen', 'Portugal': 'Portugal', 'Romania': 'Rumänien',
+  'Serbia': 'Serbien', 'South Korea': 'Südkorea', 'Spain': 'Spanien',
+  'Sri Lanka': 'Sri Lanka', 'Syria': 'Syrien', 'Taiwan': 'Taiwan',
+  'Thailand': 'Thailand', 'Tunisia': 'Tunesien', 'Turkey': 'Türkei',
+  'Türkiye': 'Türkei', 'Ukraine': 'Ukraine',
+  'United States': 'USA', 'United States of America': 'USA', 'USA': 'USA',
+  'Vietnam': 'Vietnam',
+};
+
+function toGermanCountry(name) {
+  if (!name) return name;
+  return COUNTRY_DE[name] || COUNTRY_DE[name.trim()] || name;
 }
 
 function shippingWeight(sizeW) {
@@ -275,7 +302,7 @@ export async function mockKiAnalyze(imageFiles, opts = {}) {
     wash_details,
     condition,
     measurements,
-    country_of_origin: country_of_origin || 'Pakistan',
+    country_of_origin: toGermanCountry(country_of_origin) || 'Pakistan',
     sku: validSku,
     taxable,
     tags,
