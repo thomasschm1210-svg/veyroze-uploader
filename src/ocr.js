@@ -55,31 +55,39 @@ export async function extractText(imagePath) {
   }
 }
 
-// Lightweight: prüft ob ein Bild eine 5-stellige SKU-Nummer enthält (Separator-Erkennung)
+// Prüft ob ein Bild eine 5-stellige SKU-Nummer enthält.
+// Versucht 4 Rotationen (EXIF + 90°/180°/270°) — Tütenfotos kommen oft gedreht an.
 export async function detectSkuNumber(imagePath) {
-  const tmpPath = path.join(os.tmpdir(), `sku_${path.basename(imagePath)}.png`);
-  try {
-    await sharp(imagePath)
-      .resize({ width: 600, withoutEnlargement: true })
-      .grayscale()
-      .normalise()
-      .png()
-      .toFile(tmpPath);
-    const w = await getWorker();
-    const { data: { text } } = await w.recognize(tmpPath);
-    const match = text.match(/\b(\d{5})\b/);
-    return match ? match[1] : null;
-  } catch {
-    return null;
-  } finally {
-    if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+  const extraAngles = [0, 90, 180, 270];
+  for (const extra of extraAngles) {
+    const tmpPath = path.join(os.tmpdir(), `sku_${extra}_${path.basename(imagePath)}.png`);
+    try {
+      let pipeline = sharp(imagePath).rotate(); // EXIF-Korrektur immer
+      if (extra > 0) pipeline = pipeline.rotate(extra);
+      await pipeline
+        .resize({ width: 1200 })
+        .grayscale()
+        .normalise()
+        .sharpen()
+        .png()
+        .toFile(tmpPath);
+      const w = await getWorker();
+      const { data: { text } } = await w.recognize(tmpPath);
+      const match = text.match(/\b(\d{5})\b/);
+      if (match) return match[1];
+    } catch {
+      // nächste Rotation versuchen
+    } finally {
+      if (fs.existsSync(tmpPath)) try { fs.unlinkSync(tmpPath); } catch {}
+    }
   }
+  return null;
 }
 
 // Extrahiert Text aus bis zu 3 Bildern einer Gruppe (Token-Sparsamkeit)
 export async function extractGroupText(imageFiles) {
   const results = [];
-  for (const f of imageFiles.slice(0, 3)) {
+  for (const f of imageFiles.slice(0, 6)) {
     try {
       const text = await extractText(f);
       if (text.length > 10) results.push(text);

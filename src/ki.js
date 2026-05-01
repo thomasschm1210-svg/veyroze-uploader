@@ -1,6 +1,8 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
+import sharp from 'sharp';
 import { mockKiAnalyze as runMock } from './mockKi.js';
 
 const genAI = process.env.GEMINI_API_KEY
@@ -79,6 +81,26 @@ async function toInlinePart(filePath) {
   const ext  = path.extname(filePath).toLowerCase();
   const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
   return { inlineData: { data, mimeType: mime } };
+}
+
+// Preprocessed variant for separator/SKU detection:
+// - Auto-rotates via EXIF (handles upside-down/sideways bag photos)
+// - Normalises contrast (semi-transparent bag on concrete = low contrast)
+// - Sharpens edges (improves handwritten digit readability)
+async function toPreprocessedInlinePart(filePath) {
+  const tmpPath = path.join(os.tmpdir(), `vsep_${Date.now()}_${path.basename(filePath)}.jpg`);
+  try {
+    await sharp(filePath)
+      .rotate()
+      .normalise()
+      .sharpen()
+      .jpeg({ quality: 90 })
+      .toFile(tmpPath);
+    const data = (await fs.promises.readFile(tmpPath)).toString('base64');
+    return { inlineData: { data, mimeType: 'image/jpeg' } };
+  } finally {
+    if (fs.existsSync(tmpPath)) try { fs.unlinkSync(tmpPath); } catch {}
+  }
 }
 
 const COUNTRY_DE = {
@@ -172,6 +194,8 @@ const SEP_BATCH_PROMPT = `You receive multiple images in order. For EACH image, 
 
 A separator photo shows a translucent/frosted plastic bag (Tüte/Polybeutel, often with a small hanging hole) OR a piece of paper/card, with a HANDWRITTEN 5-digit inventory number on it (in marker or pencil).
 
+IMPORTANT: The photo may have been taken with the phone rotated or upside-down. The handwritten number may appear at any angle (90°, 180°, 270° rotated). Examine all orientations carefully — rotate the image mentally if needed to read the digits.
+
 Return ONLY a JSON array (no markdown, no prose), one object per input image in original order:
 [{"i":0,"sku":"48005"},{"i":1,"sku":null},...]
 
@@ -179,12 +203,12 @@ Rules:
 - "sku" must be a string of EXACTLY 5 digits, or null.
 - Numbers printed on garment care tags, brand patches, size labels, rulers/tape measures or any printed text are NOT separators — return null for those.
 - Only HANDWRITTEN numbers on a plastic bag or paper count.
-- If unsure, return null. Better to miss than to hallucinate.`;
+- The digit count must be exactly 5 — not 4, not 6. If you cannot confirm 5 digits with confidence, return null.`;
 
 export async function detectSeparatorsBatch(imagePaths) {
   if (!genAI || !imagePaths.length) return null;
   let parts;
-  try { parts = await Promise.all(imagePaths.map(toInlinePart)); }
+  try { parts = await Promise.all(imagePaths.map(toPreprocessedInlinePart)); }
   catch { return null; }
 
   for (const modelName of MODELS) {
@@ -226,8 +250,8 @@ export async function detectSeparatorImage(imagePath) {
 export async function mockKiAnalyze(imageFiles, opts = {}) {
   if (!genAI) return runMock(imageFiles);
 
-  const files = imageFiles.slice(0, 8);
-  const imageParts = await Promise.all(files.map(toInlinePart));
+  const files = imageFiles.slice(0, 20);
+  const imageParts = await Promise.all(files.map(toPreprocessedInlinePart));
 
   const raw = await callGemini(imageParts);
 
