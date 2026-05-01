@@ -28,7 +28,8 @@ Extract ALL of the following and return ONLY valid JSON, no markdown, no explana
   "country_of_origin": "country from wash care tag in German (e.g. Mexiko, Pakistan, Bangladesch, Indien, China, Türkei) — null if not visible",
   "sku": "5-digit integer or null — ONLY from a handwritten number on a plastic bag. NEVER a printed number. NEVER fewer or more than 5 digits.",
   "confidence": "high | medium | low",
-  "utility_image_indices": [2, 4]
+  "utility_image_indices": [2, 4],
+  "product_image_order": [1, 2, 6]
 }
 
 SKU identification rules — follow exactly:
@@ -50,6 +51,14 @@ Rules:
 - If a value is truly not determinable, use null
 - confidence reflects overall certainty across all extracted fields
 - utility_image_indices: 0-based indices of images that should NOT appear in the Shopify listing — only filter out: (1) photos where a ruler or tape measure is placed next to the jeans, (2) photos showing only a SKU bag or sticker. Do NOT filter out label/badge photos (e.g. the brand patch on the jeans) — those are valid product photos. Use [] if no images need filtering.
+- product_image_order: 0-based indices of product photos in this EXACT order for the Shopify listing (matches veyroze.com store pattern):
+  position 0 → front view (jeans laid flat, front side facing up)
+  position 1 → back view (jeans laid flat, back side facing up)
+  position 2 → inner badge/tag (the sewn-in label inside the waistband showing model name and fit type, e.g. "512 BOOTCUT") — include only if clearly visible in a photo
+  position 3 → outer badge/patch (the leather or woven patch sewn on the outside back waistband showing brand name and W/L size) — include only if clearly visible in a photo
+  position 4+ → detail shots of flaws or visible wear (stains, holes, heavy fading, damage) — only include if such defects are documented in a photo
+  EXCLUDE from this array: SKU bag photos, ruler/measuring tape photos, wash care tag/laundry label photos.
+  Use [] if no suitable product photos exist.
 
 Measurement rules — follow exactly:
 - A folding ruler (Zollstock) is placed alongside the jeans in the measurement photo.
@@ -243,10 +252,16 @@ export async function mockKiAnalyze(imageFiles, opts = {}) {
     sku           = null,
     confidence    = 'medium',
     utility_image_indices = [],
+    product_image_order = [],
   } = extracted;
 
-  const utilitySet   = new Set(Array.isArray(utility_image_indices) ? utility_image_indices : []);
-  const productFiles = files.filter((_, i) => !utilitySet.has(i));
+  const utilitySet = new Set(Array.isArray(utility_image_indices) ? utility_image_indices : []);
+  const orderList  = Array.isArray(product_image_order)
+    ? product_image_order.filter(i => Number.isInteger(i) && i >= 0 && i < files.length)
+    : [];
+  const productFiles = orderList.length > 0
+    ? orderList.map(i => files[i]).filter(Boolean)
+    : files.filter((_, i) => !utilitySet.has(i));
 
   // SKU must be exactly 5 digits — reject anything else regardless of what Gemini returned
   const validSku = (typeof sku === 'string' || typeof sku === 'number')

@@ -207,11 +207,47 @@
 
     /* ── Capture ─────────────────────────────── */
     .capture-actions {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-bottom: 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 28px;
     }
+
+    /* ── Photo Guide ─────────────────────────── */
+    .photo-guide {
+      margin-bottom: 28px;
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .guide-section-head {
+      padding: 10px 16px;
+      font-size: 10.5px;
+      font-weight: 500;
+      color: var(--text-2);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    .guide-items {
+      padding: 4px 16px 14px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+    .guide-chip {
+      padding: 5px 11px;
+      border-radius: 99px;
+      font-size: 12px;
+      background: var(--bg-3);
+      border: 1px solid var(--border);
+      color: var(--text-1);
+    }
+    .guide-chip.optional {
+      border-style: dashed;
+      color: var(--text-2);
+    }
+    .guide-divider { height: 1px; background: var(--border); }
     input[type=file] { display: none; }
 
     .groups-area { display: flex; flex-direction: column; gap: 14px; }
@@ -833,23 +869,14 @@
     <div class="screen active" id="screen-capture">
       <div class="page">
         <div class="page-head">
-          <div class="page-eyebrow">New Listing</div>
-          <h1 class="page-title">Capture &amp; group products</h1>
-          <p class="page-sub">Add photos for each product. AI will detect brand, size, and condition automatically.</p>
-        </div>
-
-        <div class="mode-toggle">
-          <button class="mode-btn" id="modeManual" onclick="setBatchMode(false)">Manual</button>
-          <button class="mode-btn" id="modeBatch" onclick="setBatchMode(true)">Batch</button>
-        </div>
-
-        <div class="batch-hint" id="batchHint" style="display:none">
-          Upload all photos at once. SKU bag photos (5-digit number) automatically separate products.
+          <div class="page-eyebrow">Neue Anzeige</div>
+          <h1 class="page-title">Fotos aufnehmen</h1>
+          <p class="page-sub">Füge alle Fotos dieser Jeans hinzu. Die KI liest SKU, Maße und Herkunft automatisch aus.</p>
         </div>
 
         <div class="capture-actions">
-          <button class="btn btn-secondary" onclick="openCamera()">Take photo</button>
-          <button class="btn btn-secondary" onclick="openGallery()">Choose from gallery</button>
+          <button class="btn btn-primary btn-block" onclick="openCamera()">Foto aufnehmen</button>
+          <button class="btn btn-secondary btn-block" onclick="openGallery()">Aus Galerie wählen</button>
         </div>
         <input type="file" id="cameraInput"  accept="image/*" capture="environment">
         <input type="file" id="galleryInput" accept="image/*" multiple>
@@ -857,18 +884,17 @@
         <div class="groups-area" id="groupsArea">
           <div class="empty-state" id="emptyState">
             <div class="icon">+</div>
-            <p>No photos yet.<br>Tap <strong>Take photo</strong>, <strong>Choose from gallery</strong>, or <strong>drag &amp; drop</strong> images here.</p>
+            <p>Noch keine Fotos.<br>Tippe auf <strong>Foto aufnehmen</strong> oder<br><strong>Aus Galerie wählen</strong>.</p>
           </div>
         </div>
       </div>
 
       <div class="clear-bar" id="clearBar" style="display:none">
-        <button class="btn-clear-all" onclick="confirmClearAll()">× Clear all</button>
+        <button class="btn-clear-all" onclick="confirmClearAll()">× Alle löschen</button>
       </div>
       <div class="new-product-bar" id="newProductBar" style="display:none">
-        <button class="btn btn-secondary" id="addProductBtn" onclick="addNewProduct()">+ Product</button>
-        <button class="btn btn-secondary" id="plugToggle" onclick="togglePlug()" title="Plug = taxable, Standard = diff">Standard</button>
-        <button class="btn btn-primary" id="startBtn" onclick="startUpload()">Start upload →</button>
+        <button class="btn btn-secondary" id="plugToggle" onclick="togglePlug()" title="Plug = steuerpflichtig, Standard = diff">Standard</button>
+        <button class="btn btn-primary" id="startBtn" onclick="startUpload()">Analyse starten →</button>
       </div>
     </div>
 
@@ -1027,7 +1053,6 @@ let activeGroup = 0;
 let runId       = null;
 let allProducts = [];
 let isPlug      = false;
-let batchMode   = localStorage.getItem('veyroze_batchMode') === 'true';
 
 function togglePlug() {
   isPlug = !isPlug;
@@ -1038,25 +1063,6 @@ function togglePlug() {
   btn.style.color         = isPlug ? 'var(--yellow)'          : '';
 }
 
-function setBatchMode(b) {
-  if (batchMode === b) return;
-  batchMode = b;
-  localStorage.setItem('veyroze_batchMode', b);
-  if (b && groups.length > 1) {
-    groups = [groups.flat()];
-    activeGroup = 0;
-  }
-  renderCaptureMode();
-  renderGroups();
-}
-
-function renderCaptureMode() {
-  document.getElementById('modeManual').classList.toggle('active', !batchMode);
-  document.getElementById('modeBatch').classList.toggle('active', batchMode);
-  document.getElementById('batchHint').style.display = batchMode ? 'block' : 'none';
-  const addBtn = document.getElementById('addProductBtn');
-  if (addBtn) addBtn.style.display = batchMode ? 'none' : '';
-}
 
 const PHASES = ['Duplikate', 'Komprimieren', 'Analyse', 'KI-Analyse'];
 const PHASE_LABELS = {
@@ -1176,44 +1182,20 @@ async function restoreState() {
 
 async function addFiles(files) {
   if (!files?.length) return;
-  const idx = batchMode ? 0 : activeGroupIdx();
-  if (batchMode && groups.length !== 1) { groups = [[]]; activeGroup = 0; }
+  const idx = activeGroupIdx();
   for (const f of files) {
     groups[idx].push({ blob: f, url: URL.createObjectURL(f), name: f.name || 'photo.jpg' });
   }
   await saveState();
   renderGroups();
   document.getElementById('galleryInput').value = '';
-  if (!batchMode) {
-    setTimeout(() => {
-      const cards = document.querySelectorAll('#groupsArea .product-card');
-      cards[idx]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 50);
-  }
+  setTimeout(() => {
+    const cards = document.querySelectorAll('#groupsArea .product-card');
+    cards[idx]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, 50);
 }
 
-// Drag & Drop: Bilder auf die Capture-Seite ziehen
-document.addEventListener('dragover', e => {
-  if (!document.getElementById('screen-capture').classList.contains('active')) return;
-  if (!e.dataTransfer?.types?.includes('Files')) return;
-  e.preventDefault();
-  document.getElementById('groupsArea').classList.add('drop-over');
-});
-document.addEventListener('dragleave', e => {
-  if (!e.relatedTarget) document.getElementById('groupsArea').classList.remove('drop-over');
-});
-document.addEventListener('drop', e => {
-  document.getElementById('groupsArea').classList.remove('drop-over');
-  if (!document.getElementById('screen-capture').classList.contains('active')) return;
-  if (!e.dataTransfer?.types?.includes('Files')) return;
-  e.preventDefault();
-  const files = [...e.dataTransfer.files].filter(f => f.type.startsWith('image/'));
-  if (files.length) addFiles(files);
-});
-
-
 restoreState();
-renderCaptureMode();
 
 // ── Drag & Drop file import ───────────────────────────────────────────────────
 (function setupDropZone() {
@@ -1274,24 +1256,6 @@ function renderGroups() {
   area.innerHTML = '';
   bar.style.display = 'flex';
   clearBar.style.display = 'block';
-
-  if (batchMode) {
-    const allItems = groups.flat();
-    const strip = document.createElement('div');
-    strip.className = 'batch-flat-strip';
-    allItems.forEach(item => {
-      const img = document.createElement('img');
-      img.src = item.url; img.loading = 'lazy';
-      strip.appendChild(img);
-    });
-    const count = document.createElement('div');
-    count.className = 'batch-count';
-    count.textContent = `${allItems.length} photo${allItems.length !== 1 ? 's' : ''} · separators auto-detected`;
-    area.appendChild(strip);
-    area.appendChild(count);
-    saveState().catch(() => {});
-    return;
-  }
 
   groups.forEach((grp, gi) => {
     const card   = document.createElement('div');
@@ -1459,14 +1423,9 @@ async function startUpload() {
 
   startSSE();
 
-  let runBody;
-  if (batchMode) {
-    runBody = { runId, folderName: isPlug ? 'Plug' : '' };
-  } else {
-    let flatIdx = 0;
-    const serverGroups = groups.map(grp => grp.map(() => uploadedFiles[flatIdx++]));
-    runBody = { runId, groups: serverGroups, folderName: isPlug ? 'Plug' : '' };
-  }
+  let flatIdx = 0;
+  const serverGroups = groups.map(grp => grp.map(() => uploadedFiles[flatIdx++]));
+  const runBody = { runId, groups: serverGroups, folderName: isPlug ? 'Plug' : '' };
 
   await fetch('/api/run', {
     method: 'POST',

@@ -99,7 +99,6 @@ export async function runPipeline(groups, baseDir, opts = {}) {
   const prog3   = new ProgressClass(cleanGroups.length, 'Analyse');
   prog3.setPhase('Analyse');
   const limit   = pLimit(CONCURRENCY);
-  const csvEntries = [];
 
   const tasks = cleanGroups.map((group, i) =>
     limit(async () => {
@@ -127,7 +126,6 @@ export async function runPipeline(groups, baseDir, opts = {}) {
       } else {
         finalPaths = router.moveToProcessed(group, groupLabel);
         logger.product(i + 1, product, group, groupLabel);
-        csvEntries.push({ product, imageFiles: finalPaths, groupIndex: i + 1 });
       }
 
       prog3.tick(`${product.brand} ${product.model || ''} (${product._confidence}%)`);
@@ -168,13 +166,13 @@ export async function runPipeline(groups, baseDir, opts = {}) {
   prog4.done();
 
   // ── Phase 5: CSV-Export ─────────────────────────────────────────────────────
-  log.header('PHASE 4 / 4  CSV-Export');
+  log.header('PHASE 5 / 5  CSV-Export');
   let csvPath = null;
 
-  if (csvEntries.length > 0) {
+  if (products.length > 0) {
     csvPath = router.csvPath(ts);
-    exportToCSV(csvEntries, csvPath);
-    log.success(`CSV: ${csvEntries.length} Produkte → ${path.basename(csvPath)}`);
+    exportToCSV(products, csvPath);
+    log.success(`CSV: ${products.length} Produkte → ${path.basename(csvPath)}`);
     log.dim(`Pfad: ${csvPath}`);
   } else {
     log.warn('Keine CSV-fähigen Produkte (alle in Review oder Fehler)');

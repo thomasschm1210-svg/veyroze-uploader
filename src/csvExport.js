@@ -1,17 +1,5 @@
-/**
- * Shopify CSV-Exporter.
- *
- * Erzeugt eine CSV-Datei im offiziellen Shopify-Produkt-Import-Format.
- * Doku: https://help.shopify.com/en/manual/products/import-export/using-csv
- *
- * Bilder werden als lokale Pfade eingetragen (müssen vor dem Import
- * auf einen öffentlichen Server hochgeladen werden — oder via Shopify-App).
- */
-
 import fs from 'fs';
-import path from 'path';
 
-// Shopify CSV-Spalten (Pflicht + wichtigste optionale)
 const HEADERS = [
   'Handle',
   'Title',
@@ -47,10 +35,8 @@ function toHandle(title) {
 
 function csvCell(value) {
   const str = String(value ?? '');
-  // Anführungszeichen escapen und Zelle in Quotes einschließen wenn nötig
-  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+  if (str.includes(',') || str.includes('"') || str.includes('\n'))
     return `"${str.replace(/"/g, '""')}"`;
-  }
   return str;
 }
 
@@ -58,62 +44,50 @@ function buildRow(fields) {
   return HEADERS.map(h => csvCell(fields[h] ?? '')).join(',');
 }
 
-function buildHtml({ description, features }) {
-  const list = features.map(f => `<li>${f}</li>`).join('');
-  return `<p>${description}</p><ul>${list}</ul>`;
-}
-
 /**
- * Fügt Produkte zur CSV hinzu.
- * @param {Array<{product, imageFiles, groupIndex}>} entries
- * @param {string} outputPath  Zielpfad für die CSV-Datei
+ * Exports KI-analyzed products to Shopify-compatible CSV.
+ * @param {Array<{ki, images, index}>} products  from pipeline Phase 4
+ * @param {string} outputPath
  */
-export function exportToCSV(entries, outputPath) {
-  // Header-Zeile: Spalten mit Leerzeichen in Anführungszeichen
+export function exportToCSV(products, outputPath) {
   const rows = [HEADERS.map(csvCell).join(',')];
 
-  for (const { product, imageFiles, groupIndex } of entries) {
-    const {
-      brand, model, size, category, condition,
-      color, features, description, suggested_price,
-    } = product;
-
-    const title  = [brand, model, size].filter(Boolean).join(' ') || `Produkt ${groupIndex}`;
+  for (const { ki, images, index } of products) {
+    const title  = ki.titel_vorschlag || `Produkt ${index}`;
     const handle = toHandle(title);
-    const sku    = `VEY-${String(groupIndex).padStart(4, '0')}`;
-    const tags   = [brand, category, condition, color, size].filter(Boolean).join(', ');
-    const html   = buildHtml({ description, features });
+    const sku    = ki.sku || '';
+    const tags   = Array.isArray(ki.tags) ? ki.tags.join(', ') : (ki.tags || '');
+    const size   = ki.size_corrected || ki.size_label || ki.groesse || '';
+    const body   = `<p>${(ki.beschreibung || '').replace(/\n/g, '<br>')}</p>`;
 
-    // Erste Zeile: Produkt-Stammdaten + erstes Bild
     rows.push(buildRow({
       'Handle':                       handle,
       'Title':                        title,
-      'Body (HTML)':                  html,
-      'Vendor':                       brand || '',
-      'Product Category':             category || '',
-      'Type':                         category || '',
+      'Body (HTML)':                  body,
+      'Vendor':                       ki.marke || '',
+      'Product Category':             'Apparel & Accessories > Clothing > Pants',
+      'Type':                         'Jeans',
       'Tags':                         tags,
-      'Published':                    'FALSE',           // Draft
+      'Published':                    'FALSE',
       'Option1 Name':                 'Größe',
       'Option1 Value':                size || 'One Size',
       'Variant SKU':                  sku,
-      'Variant Price':                suggested_price.toFixed(2),
+      'Variant Price':                '',
       'Variant Compare At Price':     '',
       'Variant Inventory Qty':        '1',
       'Variant Inventory Policy':     'deny',
       'Variant Fulfillment Service':  'manual',
       'Variant Requires Shipping':    'TRUE',
-      'Image Src':                    imageFiles[0] || '',
+      'Image Src':                    images[0] || '',
       'Image Position':               '1',
       'Image Alt Text':               title,
       'Status':                       'draft',
     }));
 
-    // Weitere Bilder: nur Handle + Image-Spalten befüllen
-    imageFiles.slice(1).forEach((imgPath, i) => {
+    images.slice(1).forEach((src, i) => {
       rows.push(buildRow({
         'Handle':         handle,
-        'Image Src':      imgPath,
+        'Image Src':      src,
         'Image Position': String(i + 2),
         'Image Alt Text': `${title} — Bild ${i + 2}`,
       }));
