@@ -5,7 +5,7 @@
 AI-powered Shopify listing automation for secondhand resellers.
 Photos → Gemini Vision AI detects product data → editable cards → Shopify upload.
 
-**Path:** `/Users/thomas.rssk/Documents/veyroze_uploader`
+**Path:** `./` (lokales Projektverzeichnis)
 **Stack:** Node.js 24, Express 5, Tesseract.js, sharp, Vanilla JS ESM (no React/Vue, no TypeScript)
 
 ---
