@@ -31,6 +31,7 @@ Extract ALL of the following and return ONLY valid JSON, no markdown, no explana
   "sku": "5-digit integer or null — ONLY from a handwritten number on a plastic bag. NEVER a printed number. NEVER fewer or more than 5 digits.",
   "confidence": "high | medium | low",
   "utility_image_indices": [2, 4],
+  "measurement_image_indices": [1, 3, 5],
   "product_image_order": [1, 2, 6]
 }
 
@@ -53,6 +54,7 @@ Rules:
 - If a value is truly not determinable, use null
 - confidence reflects overall certainty across all extracted fields
 - utility_image_indices: 0-based indices of images that should NOT appear in the Shopify listing — only filter out: (1) photos where a ruler or tape measure is placed next to the jeans, (2) photos showing only a SKU bag or sticker. Do NOT filter out label/badge photos (e.g. the brand patch on the jeans) — those are valid product photos. Use [] if no images need filtering.
+- measurement_image_indices: 0-based indices of ALL photos that show a ruler or measuring tape next to the jeans (these are the measurement photos). Include every image where a Zollstock is visible. Use [] if none.
 - product_image_order: 0-based indices of product photos in this EXACT order for the Shopify listing (matches veyroze.com store pattern):
   position 0 → front view (jeans laid flat, front side facing up)
   position 1 → back view (jeans laid flat, back side facing up)
@@ -63,18 +65,26 @@ Rules:
   Use [] if no suitable product photos exist.
 
 Measurement rules — follow exactly:
-- A folding ruler (Zollstock) is placed alongside the jeans in the measurement photo.
+- A folding ruler (Zollstock) appears in the measurement photos.
 - Do NOT estimate or guess. Read the ruler markings directly from the photo.
 - If no ruler is visible in any photo, return null for all measurement fields.
-- For EACH measurement, use this exact method:
-  1. Find the first visible number on the ruler at the top/start of the image.
-  2. Follow the ruler downward as the centimeter values increase.
-  3. Find the last centimeter mark where fabric is still underneath the ruler.
-  4. The next mark has no fabric beneath it — take that number and subtract 1. That is the measurement.
-- length_cm: apply the method above along the full length of the jeans (waistband top to hem bottom).
-- waist_cm: apply the method above across the flat waistband width, then multiply the result by 2 (flat half × 2 = full circumference).
-- leg_opening_cm: apply the method above across the flat leg hem width, then multiply the result by 2 (flat half × 2 = full circumference).
-- Do not round to the nearest 5. Return the exact value from the ruler.`;
+- The ruler has large RED numbers every 10 cm — use them as anchors to confirm readings.
+- The ruler does NOT start at 0 in the photo frame (it may begin at 80, 12, etc.). Read the ABSOLUTE printed number at the fabric edge.
+- NEVER multiply, add, or subtract anything. Return the exact number shown on the ruler at the fabric edge.
+
+Identify each measurement photo by ruler orientation:
+
+VERTICAL RULER (runs top-to-bottom along the jeans side seam) → length_cm:
+  The fabric ends at the leg hem at the bottom. Read the ruler number at the bottom edge of the hem. That IS length_cm.
+
+HORIZONTAL RULER near the WAISTBAND (belt loops visible, upper part of jeans) → waist_cm:
+  One end of the waistband is at the ruler's start mark. The fabric ends at the other side.
+  Read the ruler number at the FAR end of the waistband where the fabric stops. That IS waist_cm. Do NOT multiply.
+
+HORIZONTAL RULER at the LEG HEM (frayed or stitched bottom edge of jeans) → leg_opening_cm:
+  Same as waist: read the ruler number at the FAR end of the hem where the fabric stops. That IS leg_opening_cm. Do NOT multiply.
+
+- Do not round to the nearest 5. Return the exact value.`;
 
 async function toInlinePart(filePath) {
   const data = (await fs.promises.readFile(filePath)).toString('base64');
@@ -190,6 +200,65 @@ async function callGemini(imageParts) {
   throw new Error('Alle Gemini-Modelle nicht erreichbar. Bitte später erneut versuchen.');
 }
 
+const MEASUREMENT_PROMPT = `You receive measurement photos of jeans laid flat next to a folding ruler (Zollstock).
+
+YOUR TASK: Walk along the ruler from left to right (horizontal) or top to bottom (vertical) and find the exact point where the jeans fabric ENDS — the last centimeter where there is still fabric underneath the ruler. Read the number printed on the ruler at that exact point.
+
+HOW TO WALK THE RULER:
+1. Start from the side where you can see fabric under the ruler.
+2. Move mentally along the ruler, centimeter by centimeter, toward the open end.
+3. Stop at the precise point where the fabric disappears — where the ruler has only floor/background beneath it and no more jeans fabric.
+4. Read the number on the ruler at THAT exact point. That number is the measurement.
+
+WHAT TO IGNORE:
+- Loose threads or frayed strands hanging past the fabric — these are NOT fabric. Stop at the last solid fabric.
+- Belt loops that may extend past the waistband edge — stop at the waistband fabric itself.
+- The end of the ruler in the photo frame — the ruler extends beyond the fabric, never use the ruler's visible end.
+
+IDENTIFY THE MEASUREMENT TYPE by ruler orientation:
+- VERTICAL ruler (runs along the jeans from top to bottom) → this is length_cm
+- HORIZONTAL ruler near the WAISTBAND (belt loops visible at top of jeans) → this is waist_cm
+- HORIZONTAL ruler at the LEG HEM (bottom edge of jeans, may be frayed) → this is leg_opening_cm
+
+PLAUSIBILITY CHECK — before returning, verify:
+- length_cm should be between 95 and 115. If outside this range, walk the ruler again.
+- waist_cm should be between 35 and 55. If outside this range, walk the ruler again.
+- leg_opening_cm should be between 14 and 28. If outside this range, walk the ruler again.
+
+Return ONLY valid JSON, no markdown, no explanation:
+{"length_cm": <number or null>, "waist_cm": <number or null>, "leg_opening_cm": <number or null>}
+
+Use null only if the ruler is not clearly visible. Decimal .5 values are allowed.`;
+
+async function callGeminiMeasurements(imageParts) {
+  for (const modelName of MODELS) {
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const model  = genAI.getGenerativeModel({ model: modelName });
+        const result = await model.generateContent([MEASUREMENT_PROMPT, ...imageParts]);
+        const text   = result.response.text().trim();
+        const match  = text.match(/\{[\s\S]*\}/);
+        if (!match) continue;
+        const parsed = JSON.parse(match[0]);
+        const valid  = ['length_cm', 'waist_cm', 'leg_opening_cm'].every(
+          k => parsed[k] == null || (typeof parsed[k] === 'number' && parsed[k] > 0)
+        );
+        if (valid) return parsed;
+      } catch (err) {
+        const status = err?.status;
+        if (status === 404) break;
+        if (RETRYABLE.has(status) && attempt < MAX_ATTEMPTS) {
+          await new Promise(r => setTimeout(r, attempt * 2000));
+          continue;
+        }
+        if (RETRYABLE.has(status)) break;
+        throw err;
+      }
+    }
+  }
+  return null;
+}
+
 const SEP_BATCH_PROMPT = `You receive multiple images in order. For EACH image, determine if it is a SEPARATOR PHOTO.
 
 A separator photo shows a translucent/frosted plastic bag (Tüte/Polybeutel, often with a small hanging hole) OR a piece of paper/card, with a HANDWRITTEN 5-digit inventory number on it (in marker or pencil).
@@ -261,6 +330,18 @@ export async function mockKiAnalyze(imageFiles, opts = {}) {
   } catch {
     const match = raw.match(/\{[\s\S]*\}/);
     extracted = match ? JSON.parse(match[0]) : {};
+  }
+
+  // Phase 2: dedicated measurement pass on ruler photos only
+  const measIdx = Array.isArray(extracted.measurement_image_indices)
+    ? extracted.measurement_image_indices.filter(i => Number.isInteger(i) && i >= 0 && i < files.length)
+    : [];
+  if (measIdx.length > 0) {
+    try {
+      const measParts  = await Promise.all(measIdx.map(i => toPreprocessedInlinePart(files[i])));
+      const measResult = await callGeminiMeasurements(measParts);
+      if (measResult) extracted.measurements = measResult;
+    } catch { /* Phase 2 failure is non-fatal — keep Phase 1 measurements */ }
   }
 
   const {
