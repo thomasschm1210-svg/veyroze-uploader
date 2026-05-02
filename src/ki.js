@@ -174,7 +174,7 @@ function buildJeansDescription(brand, model, sizeW, sizeL, washDetails, conditio
   ].join('\n');
 }
 
-const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest'];
+const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash-latest'];
 const RETRYABLE = new Set([429, 503]);
 const MAX_ATTEMPTS = 3;
 
@@ -334,7 +334,7 @@ export async function mockKiAnalyze(imageFiles, opts = {}) {
 
   // Phase 2: dedicated measurement pass on ruler photos only
   const measIdx = Array.isArray(extracted.measurement_image_indices)
-    ? extracted.measurement_image_indices.filter(i => Number.isInteger(i) && i >= 0 && i < files.length)
+    ? extracted.measurement_image_indices.filter(i => Number.isInteger(i) && i >= 0 && i < files.length).sort((a, b) => a - b)
     : [];
   if (measIdx.length > 0) {
     try {
@@ -430,5 +430,6 @@ export async function mockKiAnalyze(imageFiles, opts = {}) {
     shipping_weight_kg: weight,
     hs_code:         '6309000',
     product_images:  productFiles,
+    measurement_images: measIdx.map(i => files[i]).filter(Boolean),
   };
 }

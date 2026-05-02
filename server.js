@@ -37,6 +37,23 @@ function sendEvent(runId, event, data) {
   if (client) client.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
+function makeProgressClass(runId) {
+  return class {
+    constructor(total, label) {
+      this._n = 0; this._total = total; this._label = label;
+    }
+    setPhase(phase) { sendEvent(runId, 'phase', { phase }); }
+    tick(msg) {
+      this._n++;
+      sendEvent(runId, 'progress', {
+        label: this._label, done: this._n, total: this._total,
+        msg: String(msg || ''), pct: Math.round((this._n / this._total) * 100),
+      });
+    }
+    done() { sendEvent(runId, 'phase-done', { label: this._label }); }
+  };
+}
+
 // ── Serve uploaded/processed images ───────────────────────────────────────
 app.get('/api/image/:runId/*path', async (req, res) => {
   const imgPath = [].concat(req.params.path).join('/');
@@ -97,30 +114,6 @@ app.post('/api/run', express.json(), async (req, res) => {
 
   res.json({ started: true });
 
-  class MobileProgress {
-    constructor(total, label) {
-      this._n     = 0;
-      this._total = total;
-      this._label = label;
-    }
-    setPhase(phase) {
-      sendEvent(runId, 'phase', { phase });
-    }
-    tick(msg) {
-      this._n++;
-      sendEvent(runId, 'progress', {
-        label: this._label,
-        done:  this._n,
-        total: this._total,
-        msg:   String(msg || ''),
-        pct:   Math.round((this._n / this._total) * 100),
-      });
-    }
-    done() {
-      sendEvent(runId, 'phase-done', { label: this._label });
-    }
-  }
-
   try {
     let groups;
     if (rawGroups?.length) {
@@ -146,7 +139,7 @@ app.post('/api/run', express.json(), async (req, res) => {
 
     const result = await runPipeline(groups, runDir, {
       separators: [],
-      ProgressClass: MobileProgress,
+      ProgressClass: makeProgressClass(runId),
       folderName: folderName || '',
     });
 
@@ -161,6 +154,9 @@ app.post('/api/run', express.json(), async (req, res) => {
         ? `/api/image/${runId}/${path.relative(runDir, p.thumbnail)}`
         : null,
       images: (p.images || []).filter(f => fs.existsSync(f)).map(f =>
+        `/api/image/${runId}/${path.relative(runDir, f)}`
+      ),
+      measurementImages: (p.measurementImages || []).filter(f => fs.existsSync(f)).map(f =>
         `/api/image/${runId}/${path.relative(runDir, f)}`
       ),
     }));
