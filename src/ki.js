@@ -175,7 +175,7 @@ function buildJeansDescription(brand, model, sizeW, sizeL, washDetails, conditio
   ].join('\n');
 }
 
-const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash-latest'];
+const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest'];
 const RETRYABLE = new Set([429, 503]);
 const MAX_ATTEMPTS = 3;
 
@@ -320,7 +320,7 @@ export async function detectSeparatorImage(imagePath) {
 export async function mockKiAnalyze(imageFiles, opts = {}) {
   if (!genAI) return runMock(imageFiles);
 
-  const files = imageFiles.slice(0, 20);
+  const files = imageFiles.slice(0, 90);
   const imageParts = await Promise.all(files.map(toPreprocessedInlinePart));
 
   const raw = await callGemini(imageParts);
@@ -333,17 +333,9 @@ export async function mockKiAnalyze(imageFiles, opts = {}) {
     extracted = match ? JSON.parse(match[0]) : {};
   }
 
-  // Phase 2: dedicated measurement pass on ruler photos only
   const measIdx = Array.isArray(extracted.measurement_image_indices)
     ? extracted.measurement_image_indices.filter(i => Number.isInteger(i) && i >= 0 && i < files.length).sort((a, b) => a - b)
     : [];
-  if (measIdx.length > 0) {
-    try {
-      const measParts  = await Promise.all(measIdx.map(i => toPreprocessedInlinePart(files[i])));
-      const measResult = await callGeminiMeasurements(measParts);
-      if (measResult) extracted.measurements = measResult;
-    } catch { /* Phase 2 failure is non-fatal — keep Phase 1 measurements */ }
-  }
 
   const {
     brand         = 'Unknown',

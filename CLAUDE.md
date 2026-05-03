@@ -53,7 +53,7 @@ docs/             Requirements: anforderungen-shopify-automation.md (coding refe
 | Express 5 Wildcard syntax | `*path` (named), access via `req.params.path` — never use `*` alone |
 | ES module exports are read-only | Pass `opts.ProgressClass`, never assign `mod.Progress =` |
 | `timingSafeEqual` with different lengths | Always check `token.length !== expected.length` before calling — crashes with RangeError otherwise |
-| Gemini model names | `gemini-1.5-flash` returns 404 on v1beta. Use `['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash-latest']` |
+| Gemini model names | All 1.5-flash models are shut down (404). Use `['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest']` |
 | Multer + middleware order | Auth middleware runs before multer — headers are available, body/files are not yet |
 
 ---
