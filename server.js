@@ -156,6 +156,9 @@ app.post('/api/run', express.json(), async (req, res) => {
       images: (p.images || []).filter(f => fs.existsSync(f)).map(f =>
         `/api/image/${runId}/${path.relative(runDir, f).split(path.sep).join('/')}`
       ),
+      allImages: (p.allImages || []).filter(f => fs.existsSync(f)).map(f =>
+        `/api/image/${runId}/${path.relative(runDir, f).split(path.sep).join('/')}`
+      ),
       measurementImages: (p.measurementImages || []).filter(f => fs.existsSync(f)).map(f =>
         `/api/image/${runId}/${path.relative(runDir, f).split(path.sep).join('/')}`
       ),

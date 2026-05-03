@@ -153,7 +153,8 @@ function lengthLabel(sizeL, lengthCm) {
 }
 
 function buildTitle(brand, model, fit, sizeW, sizeL) {
-  const parts = [brand, model, fit, 'Jeans'].filter(Boolean);
+  const fitInTitle = fit?.toLowerCase() === 'bootcut' ? fit : null;
+  const parts = [brand, fitInTitle, 'Jeans'].filter(Boolean);
   const size  = sizeW && sizeL ? ` (W${sizeW}/L${sizeL})` : '';
   return `${parts.join(' ')}${size}`;
 }
@@ -394,8 +395,9 @@ export async function mockKiAnalyze(imageFiles, opts = {}) {
 
   const weight = size_w ? shippingWeight(size_w) : 0.8;
 
-  const titel_vorschlag = buildTitle(brand, jeansModel, fit, size_w, correctedL ?? size_l);
-  const beschreibung    = buildJeansDescription(brand, jeansModel, size_w, correctedL ?? size_l, wash_details, condition, fit, measurements);
+  const normalizedFit   = fit?.toLowerCase() === 'bootcut' ? fit : (fit ? 'straight / regular' : null);
+  const titel_vorschlag = buildTitle(brand, jeansModel, normalizedFit, size_w, correctedL ?? size_l);
+  const beschreibung    = buildJeansDescription(brand, jeansModel, size_w, correctedL ?? size_l, wash_details, condition, normalizedFit, measurements);
 
   const konfidenzMap = { high: 'hoch', medium: 'mittel', low: 'niedrig' };
 
@@ -403,7 +405,7 @@ export async function mockKiAnalyze(imageFiles, opts = {}) {
     // Legacy-Felder (pipeline.js display)
     produkttyp:      'Jeans',
     marke:           brand,
-    stil:            fit,
+    stil:            normalizedFit,
     groesse:         correctedSize,
     zustand:         condition,
     titel_vorschlag,
@@ -413,7 +415,7 @@ export async function mockKiAnalyze(imageFiles, opts = {}) {
 
     // Neue Felder (Shopify-Upload)
     modell:          jeansModel,
-    fit,
+    fit:             normalizedFit,
     size_w,
     size_l,
     size_label:      labelSize,
