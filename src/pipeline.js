@@ -116,7 +116,9 @@ export async function runPipeline(groups, baseDir, opts = {}) {
         }, group, groupLabel);
       }
 
-      const productImages = ki.product_images?.length ? ki.product_images : finalPaths;
+      const groupIdx = new Map(group.map((f, i) => [f, i]));
+      const remap = paths => (paths || []).map(f => finalPaths[groupIdx.get(f)]).filter(Boolean);
+      const productImages = ki.product_images?.length ? remap(ki.product_images) : finalPaths;
       prog3.tick(ki.titel_vorschlag);
 
       return {
@@ -124,7 +126,7 @@ export async function runPipeline(groups, baseDir, opts = {}) {
         label: groupLabel,
         thumbnail: productImages[0] || null,
         images: productImages,
-        measurementImages: ki.measurement_images || [],
+        measurementImages: remap(ki.measurement_images),
         ki,
         isReview,
       };

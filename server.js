@@ -151,13 +151,13 @@ app.post('/api/run', express.json(), async (req, res) => {
     const products = (result.products || []).map(p => ({
       ...p,
       thumbnail: p.thumbnail && fs.existsSync(p.thumbnail)
-        ? `/api/image/${runId}/${path.relative(runDir, p.thumbnail)}`
+        ? `/api/image/${runId}/${path.relative(runDir, p.thumbnail).split(path.sep).join('/')}`
         : null,
       images: (p.images || []).filter(f => fs.existsSync(f)).map(f =>
-        `/api/image/${runId}/${path.relative(runDir, f)}`
+        `/api/image/${runId}/${path.relative(runDir, f).split(path.sep).join('/')}`
       ),
       measurementImages: (p.measurementImages || []).filter(f => fs.existsSync(f)).map(f =>
-        `/api/image/${runId}/${path.relative(runDir, f)}`
+        `/api/image/${runId}/${path.relative(runDir, f).split(path.sep).join('/')}`
       ),
     }));
 
