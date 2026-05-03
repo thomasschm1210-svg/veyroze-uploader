@@ -1773,7 +1773,7 @@ function updateMeasViewer() {
   if (src) img.src = src;
 
   const nextIdx   = (currentMeasImgIdx + 1) % currentMeasImages.length;
-  btn.textContent = '▶ Weiter';
+  btn.textContent = `▶ ${MEAS_LABELS[nextIdx] || 'Weiter'}`;
 
   fields.forEach((f, i) => f.classList.toggle('meas-field-active', i === currentMeasImgIdx));
 }
