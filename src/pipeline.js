@@ -1,5 +1,4 @@
 import path   from 'path';
-import pLimit from 'p-limit';
 
 import { log }            from './logger.js';
 import { Progress }       from './progress.js';
@@ -10,8 +9,6 @@ import { mockKiAnalyze }  from './ki.js';
 import { exportToCSV }    from './csvExport.js';
 import { FileRouter }     from './fileRouter.js';
 import { RunLogger }      from './runLogger.js';
-
-const CONCURRENCY = 2;
 
 export async function runPipeline(groups, baseDir, opts = {}) {
   const ProgressClass = opts.ProgressClass ?? Progress;
@@ -55,31 +52,24 @@ export async function runPipeline(groups, baseDir, opts = {}) {
   }
   prog1.done();
 
-  // ── Phase 2: Komprimieren ───────────────────────────────────────────────────
-  log.header(`PHASE 2 / 4  Bilder komprimieren (${cleanGroups.length} Gruppen)`);
-  const prog2 = new ProgressClass(cleanGroups.length, 'Komprimieren');
+  // ── Phase 2 + 3: Komprimieren → KI (Fließband, alle Produkte parallel) ───────
+  log.header(`PHASE 2+3 / 4  Komprimieren & KI (${cleanGroups.length} Produkte)`);
+  const prog2    = new ProgressClass(cleanGroups.length, 'Komprimieren');
+  const prog3    = new ProgressClass(cleanGroups.length || 1, 'KI-Analyse');
   prog2.setPhase('Komprimieren');
   let totalSavedMB = 0;
-
-  for (const group of cleanGroups) {
-    const stats = await compressGroup(group);
-    totalSavedMB += parseFloat(stats.savedMB);
-    prog2.tick(`gespart: ${stats.savedMB} MB`);
-  }
-  prog2.done();
-  logger.stats.savedMB = totalSavedMB.toFixed(1);
-  log.success(`Komprimierung: ${totalSavedMB.toFixed(1)} MB gespart`);
-
-  // ── Phase 3: KI-Analyse ─────────────────────────────────────────────────────
-  log.header(`PHASE 3 / 4  KI-Analyse (${cleanGroups.length} Produkte)`);
-  const prog3  = new ProgressClass(cleanGroups.length || 1, 'KI-Analyse');
-  prog3.setPhase('KI-Analyse');
-  const limit  = pLimit(CONCURRENCY);
-  const products = [];
+  const products   = [];
+  let kiPhaseSet   = false;
 
   const tasks = cleanGroups.map((group, i) =>
-    limit(async () => {
+    (async () => {
       const groupLabel = `produkt-${String(i + 1).padStart(3, '0')}`;
+
+      const compStats = await compressGroup(group);
+      totalSavedMB += parseFloat(compStats.savedMB);
+      prog2.tick(`gespart: ${compStats.savedMB} MB`);
+
+      if (!kiPhaseSet) { kiPhaseSet = true; prog3.setPhase('KI-Analyse'); }
 
       const secKi = await securityCheck({ phase: 'ki', ocrText: '' });
       if (secKi.block) {
@@ -131,12 +121,15 @@ export async function runPipeline(groups, baseDir, opts = {}) {
         ki,
         isReview,
       };
-    })
+    })()
   );
 
   const settled = (await Promise.all(tasks)).filter(Boolean);
   products.push(...settled);
+  prog2.done();
   prog3.done();
+  logger.stats.savedMB = totalSavedMB.toFixed(1);
+  log.success(`Komprimierung: ${totalSavedMB.toFixed(1)} MB gespart`);
 
   // ── Phase 4: CSV-Export ─────────────────────────────────────────────────────
   log.header('PHASE 4 / 4  CSV-Export');

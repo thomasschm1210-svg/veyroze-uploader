@@ -966,6 +966,10 @@
         <input type="file" id="cameraInput"  accept="image/*" capture="environment">
         <input type="file" id="galleryInput" accept="image/*" multiple>
 
+        <div id="addProductRow" style="display:none;margin-bottom:14px;">
+          <button class="btn btn-secondary btn-block" onclick="addNewProduct()">+ Weiteres Produkt hinzufügen</button>
+        </div>
+
         <div class="groups-area" id="groupsArea">
           <div class="empty-state" id="emptyState">
             <div class="icon">+</div>
@@ -974,9 +978,6 @@
         </div>
       </div>
 
-      <div class="clear-bar" id="clearBar" style="display:none">
-        <button class="btn-clear-all" onclick="confirmClearAll()">× Alle löschen</button>
-      </div>
       <div class="new-product-bar" id="newProductBar" style="display:none">
         <button class="btn btn-secondary" id="plugToggle" onclick="togglePlug()" title="Plug = steuerpflichtig, Standard = diff">Standard</button>
         <button class="btn btn-primary" id="startBtn" onclick="startUpload()">Analyse starten →</button>
@@ -1337,17 +1338,19 @@ function addNewProduct() {
 
 // ── Render capture groups ────────────────────────────────────────────────────
 function renderGroups() {
-  const area     = document.getElementById('groupsArea');
-  const bar      = document.getElementById('newProductBar');
-  const clearBar = document.getElementById('clearBar');
-  const empty    = document.getElementById('emptyState');
-  const total    = groups.flat().length;
+  const area       = document.getElementById('groupsArea');
+  const bar        = document.getElementById('newProductBar');
+  const clearBar   = document.getElementById('clearBar');
+  const addRow     = document.getElementById('addProductRow');
+  const empty      = document.getElementById('emptyState');
+  const total      = groups.flat().length;
 
   if (total === 0) {
     area.innerHTML = '';
     area.appendChild(empty);
     bar.style.display = 'none';
-    clearBar.style.display = 'none';
+    if (clearBar) clearBar.style.display = 'none';
+    if (addRow) addRow.style.display = 'none';
     saveState().catch(() => {});
     return;
   }
@@ -1355,7 +1358,7 @@ function renderGroups() {
   empty?.remove();
   area.innerHTML = '';
   bar.style.display = 'flex';
-  clearBar.style.display = 'block';
+  if (addRow) addRow.style.display = '';
 
   groups.forEach((grp, gi) => {
     const card   = document.createElement('div');
@@ -1364,12 +1367,16 @@ function renderGroups() {
     const header = document.createElement('div');
     header.className = 'product-card-header';
     header.innerHTML = `<span>Product ${gi + 1} · ${grp.length} photo${grp.length !== 1 ? 's' : ''}</span>`;
-    if (groups.length > 1 || grp.length === 0) {
-      const del = document.createElement('button');
-      del.textContent = '× Remove';
-      del.onclick = () => { groups.splice(gi, 1); if (!groups.length) groups = [[]]; renderGroups(); };
-      header.appendChild(del);
-    }
+    const del = document.createElement('button');
+    del.textContent = '×';
+    del.title = 'Produkt entfernen';
+    del.onclick = () => {
+      if (!confirm(`Produkt ${gi + 1} wirklich entfernen?`)) return;
+      groups.splice(gi, 1);
+      if (!groups.length) groups = [[]];
+      renderGroups();
+    };
+    header.appendChild(del);
 
     const thumbRow = document.createElement('div');
     thumbRow.className = 'thumb-row';
@@ -1773,7 +1780,7 @@ function updateMeasViewer() {
   if (src) img.src = src;
 
   const nextIdx   = (currentMeasImgIdx + 1) % currentMeasImages.length;
-  btn.textContent = `▶ ${MEAS_LABELS[nextIdx] || 'Weiter'}`;
+  btn.textContent = '▶ Weiter';
 
   fields.forEach((f, i) => f.classList.toggle('meas-field-active', i === currentMeasImgIdx));
 }
@@ -2003,7 +2010,8 @@ function resetAll() {
   document.getElementById('groupsArea').innerHTML =
     '<div class="empty-state" id="emptyState"><div class="icon">+</div><p>No photos yet.<br>Tap <strong>Take photo</strong> or <strong>Choose from gallery</strong> to start,<br>or <strong>drag &amp; drop</strong> photos here.</p></div>';
   document.getElementById('newProductBar').style.display = 'none';
-  document.getElementById('clearBar').style.display = 'none';
+  const _addRow = document.getElementById('addProductRow');
+  if (_addRow) _addRow.style.display = 'none';
   document.getElementById('phaseList').innerHTML = '';
   document.getElementById('productList').innerHTML = '';
   document.getElementById('summaryRow').innerHTML = '';
