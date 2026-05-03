@@ -126,6 +126,7 @@ export async function runPipeline(groups, baseDir, opts = {}) {
         label: groupLabel,
         thumbnail: productImages[0] || null,
         images: productImages,
+        allImages: finalPaths,
         measurementImages: remap(ki.measurement_images),
         ki,
         isReview,
