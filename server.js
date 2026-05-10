@@ -137,18 +137,7 @@ app.post('/api/run', express.json(), async (req, res) => {
 
     initRegistry(runDir);
 
-    const result = await runPipeline(groups, runDir, {
-      separators: [],
-      ProgressClass: makeProgressClass(runId),
-      folderName: folderName || '',
-    });
-
-    const csvRel = result.csvPath
-      ? `/api/csv/${runId}/${path.basename(result.csvPath)}`
-      : null;
-
-    // Convert absolute thumbnail paths → relative URLs served by /api/image/:runId/*
-    const products = (result.products || []).map(p => ({
+    const mapPaths = (p) => ({
       ...p,
       thumbnail: p.thumbnail && fs.existsSync(p.thumbnail)
         ? `/api/image/${runId}/${path.relative(runDir, p.thumbnail).split(path.sep).join('/')}`
@@ -162,8 +151,20 @@ app.post('/api/run', express.json(), async (req, res) => {
       measurementImages: (p.measurementImages || []).filter(f => fs.existsSync(f)).map(f =>
         `/api/image/${runId}/${path.relative(runDir, f).split(path.sep).join('/')}`
       ),
-    }));
+    });
 
+    const result = await runPipeline(groups, runDir, {
+      separators: [],
+      ProgressClass: makeProgressClass(runId),
+      folderName: folderName || '',
+      onProduct: (p) => sendEvent(runId, 'product-complete', mapPaths(p)),
+    });
+
+    const csvRel = result.csvPath
+      ? `/api/csv/${runId}/${path.basename(result.csvPath)}`
+      : null;
+
+    const products = (result.products || []).map(mapPaths);
     sendEvent(runId, 'done', { csvUrl: csvRel, stats: result.stats, products });
   } catch (err) {
     sendEvent(runId, 'error', { msg: err.message });

@@ -1110,7 +1110,7 @@
               <label>Length (cm)</label>
               <div class="num-stepper">
                 <button class="step-btn" type="button" onclick="stepInput('m-len',-0.5)">−</button>
-                <input type="number" id="m-len" placeholder="98" step="0.5">
+                <input type="number" id="m-len" placeholder="98" step="0.5" oninput="syncMeasToDescription('m-len')">
                 <button class="step-btn" type="button" onclick="stepInput('m-len',0.5)">+</button>
               </div>
             </div>
@@ -1118,7 +1118,7 @@
               <label>Waist (cm)</label>
               <div class="num-stepper">
                 <button class="step-btn" type="button" onclick="stepInput('m-waist',-0.5)">−</button>
-                <input type="number" id="m-waist" placeholder="42" step="0.5">
+                <input type="number" id="m-waist" placeholder="42" step="0.5" oninput="syncMeasToDescription('m-waist')">
                 <button class="step-btn" type="button" onclick="stepInput('m-waist',0.5)">+</button>
               </div>
             </div>
@@ -1126,7 +1126,7 @@
               <label>Leg opening (cm)</label>
               <div class="num-stepper">
                 <button class="step-btn" type="button" onclick="stepInput('m-legopening',-0.5)">−</button>
-                <input type="number" id="m-legopening" placeholder="20" step="0.5">
+                <input type="number" id="m-legopening" placeholder="20" step="0.5" oninput="syncMeasToDescription('m-legopening')">
                 <button class="step-btn" type="button" onclick="stepInput('m-legopening',0.5)">+</button>
               </div>
             </div>
@@ -1135,6 +1135,10 @@
             <img id="measImg" src="" alt="Zollstock-Foto" onerror="this.style.display='none'">
             <button class="btn btn-secondary" id="measNavBtn" onclick="nextMeasImage()">&#9654; Weiter</button>
           </div>
+        </div>
+        <div class="modal-field">
+          <label>Preis (€)</label>
+          <input type="number" id="m-price" placeholder="29.90" step="0.5" min="0">
         </div>
         <div class="modal-field full">
           <label>Tags</label>
@@ -1570,6 +1574,22 @@ function startSSE() {
     markPhaseDone(label);
   });
 
+  es.addEventListener('product-complete', e => {
+    const p = JSON.parse(e.data);
+    allProducts.push(p);
+    if (document.getElementById('screen-progress').classList.contains('active')) {
+      currentFilter = 'all';
+      showScreen('screen-products');
+      document.getElementById('btnCsv').style.display = 'none';
+      document.getElementById('productList').innerHTML = '';
+      renderSummary();
+    }
+    const list = document.getElementById('productList');
+    renderKiCard(p, allProducts.length - 1, list);
+    document.getElementById('productsSubtitle').textContent =
+      `${allProducts.length} product${allProducts.length !== 1 ? 's' : ''} · processing…`;
+  });
+
   es.addEventListener('done', e => {
     const d = JSON.parse(e.data);
     setOverall(100);
@@ -1768,6 +1788,26 @@ function stepInput(id, delta) {
   const el = document.getElementById(id);
   const val = parseFloat(el.value) || 0;
   el.value = Math.max(0, Math.round((val + delta) * 2) / 2);
+  syncMeasToDescription(id);
+}
+
+const MEAS_DESC_LABELS = {
+  'm-len':        'Length',
+  'm-waist':      'Waist',
+  'm-legopening': 'Leg opening',
+};
+
+function syncMeasToDescription(inputId) {
+  const label = MEAS_DESC_LABELS[inputId];
+  if (!label) return;
+  const desc = document.getElementById('m-desc');
+  if (!desc) return;
+  const raw = document.getElementById(inputId).value;
+  const display = raw ? `${parseFloat(raw)} cm` : '— cm';
+  const re = new RegExp(`^(${label}:\\s*).*$`, 'm');
+  if (re.test(desc.value)) {
+    desc.value = desc.value.replace(re, `$1${display}`);
+  }
 }
 
 function updateMeasViewer() {
@@ -1809,6 +1849,7 @@ function openProductModal(idx) {
   document.getElementById('m-len').value        = ki.measurements?.length_cm || '';
   document.getElementById('m-waist').value      = ki.measurements?.waist_cm || '';
   document.getElementById('m-legopening').value = ki.measurements?.leg_opening_cm || '';
+  document.getElementById('m-price').value      = ki.preis_eur ?? '';
   document.getElementById('m-tags').value       = Array.isArray(ki.tags) ? ki.tags.join(', ') : (ki.tags || '');
   document.getElementById('m-desc').value       = ki.beschreibung || '';
 
@@ -1891,6 +1932,7 @@ function closeModal() {
   ki.country_of_origin = document.getElementById('m-country').value;
   ki.beschreibung     = document.getElementById('m-desc').value;
   ki.tags             = document.getElementById('m-tags').value.split(',').map(t => t.trim()).filter(Boolean);
+  ki.preis_eur        = parseFloat(document.getElementById('m-price').value) || null;
   ki.measurements     = {
     length_cm:      parseFloat(document.getElementById('m-len').value)        || null,
     waist_cm:       parseFloat(document.getElementById('m-waist').value)      || null,
