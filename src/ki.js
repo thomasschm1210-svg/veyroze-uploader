@@ -93,10 +93,17 @@ async function toInlinePart(filePath) {
   return { inlineData: { data, mimeType: mime } };
 }
 
-// Preprocessed variant for separator/SKU detection:
-// - Auto-rotates via EXIF (handles upside-down/sideways bag photos)
-// - Normalises contrast (semi-transparent bag on concrete = low contrast)
-// - Sharpens edges (improves handwritten digit readability)
+// For KI product analysis: resize to 800px (sufficient for label reading, reduces payload ~75%)
+async function toKiInlinePart(filePath) {
+  const buf = await sharp(filePath)
+    .rotate()
+    .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 82 })
+    .toBuffer();
+  return { inlineData: { data: buf.toString('base64'), mimeType: 'image/jpeg' } };
+}
+
+// For separator/SKU detection: normalise + sharpen for handwritten digit readability
 async function toPreprocessedInlinePart(filePath) {
   const tmpPath = path.join(os.tmpdir(), `vsep_${Date.now()}_${path.basename(filePath)}.jpg`);
   try {
@@ -190,7 +197,7 @@ async function callGemini(imageParts) {
         const status = err.status;
         if (status === 404) break;                        // model doesn't exist → next model
         if (RETRYABLE.has(status) && attempt < MAX_ATTEMPTS) {
-          await new Promise(r => setTimeout(r, attempt * 2000));
+          await new Promise(r => setTimeout(r, attempt * 300));
           continue;
         }
         if (RETRYABLE.has(status)) break;                // exhausted retries → next model
@@ -199,65 +206,6 @@ async function callGemini(imageParts) {
     }
   }
   throw new Error('Alle Gemini-Modelle nicht erreichbar. Bitte später erneut versuchen.');
-}
-
-const MEASUREMENT_PROMPT = `You receive measurement photos of jeans laid flat next to a folding ruler (Zollstock).
-
-YOUR TASK: Walk along the ruler from left to right (horizontal) or top to bottom (vertical) and find the exact point where the jeans fabric ENDS — the last centimeter where there is still fabric underneath the ruler. Read the number printed on the ruler at that exact point.
-
-HOW TO WALK THE RULER:
-1. Start from the side where you can see fabric under the ruler.
-2. Move mentally along the ruler, centimeter by centimeter, toward the open end.
-3. Stop at the precise point where the fabric disappears — where the ruler has only floor/background beneath it and no more jeans fabric.
-4. Read the number on the ruler at THAT exact point. That number is the measurement.
-
-WHAT TO IGNORE:
-- Loose threads or frayed strands hanging past the fabric — these are NOT fabric. Stop at the last solid fabric.
-- Belt loops that may extend past the waistband edge — stop at the waistband fabric itself.
-- The end of the ruler in the photo frame — the ruler extends beyond the fabric, never use the ruler's visible end.
-
-IDENTIFY THE MEASUREMENT TYPE by ruler orientation:
-- VERTICAL ruler (runs along the jeans from top to bottom) → this is length_cm
-- HORIZONTAL ruler near the WAISTBAND (belt loops visible at top of jeans) → this is waist_cm
-- HORIZONTAL ruler at the LEG HEM (bottom edge of jeans, may be frayed) → this is leg_opening_cm
-
-PLAUSIBILITY CHECK — before returning, verify:
-- length_cm should be between 95 and 115. If outside this range, walk the ruler again.
-- waist_cm should be between 35 and 55. If outside this range, walk the ruler again.
-- leg_opening_cm should be between 14 and 28. If outside this range, walk the ruler again.
-
-Return ONLY valid JSON, no markdown, no explanation:
-{"length_cm": <number or null>, "waist_cm": <number or null>, "leg_opening_cm": <number or null>}
-
-Use null only if the ruler is not clearly visible. Decimal .5 values are allowed.`;
-
-async function callGeminiMeasurements(imageParts) {
-  for (const modelName of MODELS) {
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      try {
-        const model  = genAI.getGenerativeModel({ model: modelName });
-        const result = await model.generateContent([MEASUREMENT_PROMPT, ...imageParts]);
-        const text   = result.response.text().trim();
-        const match  = text.match(/\{[\s\S]*\}/);
-        if (!match) continue;
-        const parsed = JSON.parse(match[0]);
-        const valid  = ['length_cm', 'waist_cm', 'leg_opening_cm'].every(
-          k => parsed[k] == null || (typeof parsed[k] === 'number' && parsed[k] > 0)
-        );
-        if (valid) return parsed;
-      } catch (err) {
-        const status = err?.status;
-        if (status === 404) break;
-        if (RETRYABLE.has(status) && attempt < MAX_ATTEMPTS) {
-          await new Promise(r => setTimeout(r, attempt * 2000));
-          continue;
-        }
-        if (RETRYABLE.has(status)) break;
-        throw err;
-      }
-    }
-  }
-  return null;
 }
 
 const SEP_BATCH_PROMPT = `You receive multiple images in order. For EACH image, determine if it is a SEPARATOR PHOTO.
@@ -301,7 +249,7 @@ export async function detectSeparatorsBatch(imagePaths) {
         const status = err?.status;
         if (status === 404) break;
         if (RETRYABLE.has(status) && attempt < MAX_ATTEMPTS) {
-          await new Promise(r => setTimeout(r, attempt * 2000));
+          await new Promise(r => setTimeout(r, attempt * 300));
           continue;
         }
         if (RETRYABLE.has(status)) break;
@@ -317,11 +265,27 @@ export async function detectSeparatorImage(imagePath) {
   return result?.[0] ?? { isSeparator: false, sku: null };
 }
 
+const MAX_KI_IMAGES = 8;
+const LABEL_RE = /label|tag|badge|patch|etikett|waist|bund|ruler|mass|cm|meas/i;
+
+function selectKiImages(imageFiles) {
+  if (imageFiles.length <= MAX_KI_IMAGES) return imageFiles;
+  const selected = new Set([0, imageFiles.length - 1]);
+  for (let i = 0; i < imageFiles.length && selected.size < MAX_KI_IMAGES; i++) {
+    if (LABEL_RE.test(path.basename(imageFiles[i]))) selected.add(i);
+  }
+  const step = Math.max(1, Math.floor(imageFiles.length / MAX_KI_IMAGES));
+  for (let i = 0; i < imageFiles.length && selected.size < MAX_KI_IMAGES; i += step) {
+    selected.add(i);
+  }
+  return [...selected].sort((a, b) => a - b).map(i => imageFiles[i]);
+}
+
 export async function mockKiAnalyze(imageFiles, opts = {}) {
   if (!genAI) return runMock(imageFiles);
 
-  const files = imageFiles.slice(0, 90);
-  const imageParts = await Promise.all(files.map(toPreprocessedInlinePart));
+  const files = selectKiImages(imageFiles.slice(0, 90));
+  const imageParts = await Promise.all(files.map(toKiInlinePart));
 
   const raw = await callGemini(imageParts);
 

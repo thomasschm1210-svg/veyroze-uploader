@@ -10,6 +10,21 @@ import { exportToCSV }    from './csvExport.js';
 import { FileRouter }     from './fileRouter.js';
 import { RunLogger }      from './runLogger.js';
 
+const KI_CONCURRENCY = 10;
+
+async function withConcurrency(fns, limit) {
+  const results = new Array(fns.length);
+  let next = 0;
+  async function worker() {
+    while (next < fns.length) {
+      const i = next++;
+      results[i] = await fns[i]();
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, fns.length) }, worker));
+  return results;
+}
+
 export async function runPipeline(groups, baseDir, opts = {}) {
   const ProgressClass = opts.ProgressClass ?? Progress;
   const ts     = Date.now();
@@ -61,8 +76,8 @@ export async function runPipeline(groups, baseDir, opts = {}) {
   const products   = [];
   let kiPhaseSet   = false;
 
-  const tasks = cleanGroups.map((group, i) =>
-    (async () => {
+  const taskFns = cleanGroups.map((group, i) =>
+    async () => {
       const groupLabel = `produkt-${String(i + 1).padStart(3, '0')}`;
 
       const compStats = await compressGroup(group);
@@ -111,7 +126,7 @@ export async function runPipeline(groups, baseDir, opts = {}) {
       const productImages = ki.product_images?.length ? remap(ki.product_images) : finalPaths;
       prog3.tick(ki.titel_vorschlag);
 
-      return {
+      const product = {
         index: i + 1,
         label: groupLabel,
         thumbnail: productImages[0] || null,
@@ -121,10 +136,12 @@ export async function runPipeline(groups, baseDir, opts = {}) {
         ki,
         isReview,
       };
-    })()
+      opts.onProduct?.(product);
+      return product;
+    }
   );
 
-  const settled = (await Promise.all(tasks)).filter(Boolean);
+  const settled = (await withConcurrency(taskFns, KI_CONCURRENCY)).filter(Boolean);
   products.push(...settled);
   prog2.done();
   prog3.done();
