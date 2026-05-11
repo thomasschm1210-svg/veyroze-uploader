@@ -86,13 +86,6 @@ HORIZONTAL RULER at the LEG HEM (frayed or stitched bottom edge of jeans) → le
 
 - Do not round to the nearest 5. Return the exact value.`;
 
-async function toInlinePart(filePath) {
-  const data = (await fs.promises.readFile(filePath)).toString('base64');
-  const ext  = path.extname(filePath).toLowerCase();
-  const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
-  return { inlineData: { data, mimeType: mime } };
-}
-
 // For KI product analysis: resize to 800px (sufficient for label reading, reduces payload ~75%)
 async function toKiInlinePart(filePath) {
   const buf = await sharp(filePath)

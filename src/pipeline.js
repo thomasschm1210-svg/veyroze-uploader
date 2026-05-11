@@ -73,7 +73,6 @@ export async function runPipeline(groups, baseDir, opts = {}) {
   const prog3    = new ProgressClass(cleanGroups.length || 1, 'KI-Analyse');
   prog2.setPhase('Komprimieren');
   let totalSavedMB = 0;
-  const products   = [];
   let kiPhaseSet   = false;
 
   const taskFns = cleanGroups.map((group, i) =>
@@ -141,8 +140,7 @@ export async function runPipeline(groups, baseDir, opts = {}) {
     }
   );
 
-  const settled = (await withConcurrency(taskFns, KI_CONCURRENCY)).filter(Boolean);
-  products.push(...settled);
+  const products = (await withConcurrency(taskFns, KI_CONCURRENCY)).filter(Boolean);
   prog2.done();
   prog3.done();
   logger.stats.savedMB = totalSavedMB.toFixed(1);

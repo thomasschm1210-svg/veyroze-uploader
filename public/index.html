@@ -386,13 +386,6 @@
       color: #0a84ff;
     }
 
-    .clear-bar {
-      position: fixed;
-      left: 50%; transform: translateX(-50%);
-      bottom: calc(92px + env(safe-area-inset-bottom));
-      z-index: 50;
-      text-align: center;
-    }
     .btn-clear-all {
       background: none;
       border: none;
@@ -1354,7 +1347,6 @@ function addNewProduct() {
 function renderGroups() {
   const area       = document.getElementById('groupsArea');
   const bar        = document.getElementById('newProductBar');
-  const clearBar   = document.getElementById('clearBar');
   const addRow     = document.getElementById('addProductRow');
   const empty      = document.getElementById('emptyState');
   const total      = groups.flat().length;
@@ -1363,7 +1355,6 @@ function renderGroups() {
     area.innerHTML = '';
     area.appendChild(empty);
     bar.style.display = 'none';
-    if (clearBar) clearBar.style.display = 'none';
     if (addRow) addRow.style.display = 'none';
     saveState().catch(() => {});
     return;
@@ -1604,7 +1595,14 @@ function startSSE() {
     const d = JSON.parse(e.data);
     setOverall(100);
     es.close();
-    showProducts(d);
+    _stats  = d.stats  || {};
+    _csvUrl = d.csvUrl || null;
+    const btnCsv = document.getElementById('btnCsv');
+    if (_csvUrl) { btnCsv.href = _csvUrl; btnCsv.style.display = ''; }
+    else btnCsv.style.display = 'none';
+    renderSummary();
+    showScreen('screen-products');
+    saveProductsState();
   });
 
   es.addEventListener('error', e => {
@@ -1791,8 +1789,6 @@ function renderKiCard(p, idx, container) {
 
 let currentModalIdx = null;
 
-
-const MEAS_LABELS = ['Length', 'Waist', 'Leg opening'];
 
 function stepInput(id, delta) {
   const el = document.getElementById(id);
