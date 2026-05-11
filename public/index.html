@@ -126,6 +126,11 @@
     .screen { display: none; }
     .screen.active { display: block; }
 
+    .nav-btn { background: none; border: none; color: #888; font-size: 15px;
+               cursor: pointer; padding: 4px 0; margin-bottom: 10px;
+               display: flex; align-items: center; gap: 6px; }
+    .nav-btn:hover { color: #fff; }
+
     .page {
       max-width: 960px;
       margin: 0 auto;
@@ -954,6 +959,8 @@
     <div class="screen active" id="screen-capture">
       <div class="page">
         <div class="page-head">
+          <button class="nav-btn" id="btnBackToResults" style="display:none"
+                  onclick="showScreen('screen-products')">Ergebnisse ansehen →</button>
           <div class="page-eyebrow">Neue Anzeige</div>
           <h1 class="page-title">Fotos aufnehmen</h1>
           <p class="page-sub">Füge alle Fotos dieser Jeans hinzu. Die KI liest SKU, Maße und Herkunft automatisch aus.</p>
@@ -1007,6 +1014,7 @@
     <div class="screen" id="screen-products">
       <div class="page">
         <div class="page-head">
+          <button class="nav-btn" onclick="showScreen('screen-capture')">← Zurück</button>
           <div class="page-eyebrow">Results</div>
           <h1 class="page-title">AI detections</h1>
           <p class="page-sub" id="productsSubtitle">Review and refine before publishing.</p>
@@ -1191,6 +1199,8 @@ function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
   window.scrollTo(0, 0);
+  const btn = document.getElementById('btnBackToResults');
+  if (btn) btn.style.display = id === 'screen-capture' && allProducts.length > 0 ? '' : 'none';
 }
 
 function openCamera() { document.getElementById('cameraInput').click(); }
