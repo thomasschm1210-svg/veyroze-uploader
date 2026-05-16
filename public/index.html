@@ -868,10 +868,7 @@
       #measImg { max-height: 260px; min-height: 120px; width: 100%; object-fit: contain; }
       #measNavBtn { width: 100%; }
     }
-    .meas-field-active .num-stepper {
-      border-color: #30d158 !important;
-      background: rgba(48,209,88,0.06) !important;
-    }
+
     .num-stepper {
       display: flex; align-items: stretch;
       background: var(--bg-2); border: 1px solid var(--border);
@@ -1099,7 +1096,11 @@
         </div>
         <div class="modal-field">
           <label>Condition</label>
-          <input type="text" id="m-condition" placeholder="top">
+          <div class="num-stepper">
+            <button class="step-btn" type="button" onclick="stepCondition(-0.5)">−</button>
+            <input type="number" id="m-condition" placeholder="8.5" step="0.5" min="0.5" max="10" oninput="syncConditionToDescription()">
+            <button class="step-btn" type="button" onclick="stepCondition(0.5)">+</button>
+          </div>
         </div>
         <div class="modal-field">
           <label>Wash details</label>
@@ -1255,7 +1256,7 @@ async function saveProductsState() {
   try {
     const db = await getDB();
     const tx = db.transaction('state', 'readwrite');
-    tx.objectStore('state').put({ key: 'products', data: allProducts, csvUrl: _csvUrl });
+    tx.objectStore('state').put({ key: 'products', data: allProducts, csvUrl: _csvUrl, runId });
     await new Promise((r, j) => { tx.oncomplete = r; tx.onerror = j; });
   } catch(e) { console.error('saveProductsState:', e); }
 }
@@ -1287,6 +1288,7 @@ async function restoreState() {
       const prec = await idbGet('products');
       if (prec?.data?.length) {
         _restoring = false;
+        if (prec.runId) runId = prec.runId;
         showProducts({ products: prec.data, stats: {}, csvUrl: prec.csvUrl });
         return;
       }
@@ -1813,7 +1815,7 @@ function renderKiCard(p, idx, container) {
   const modell = ki.modell || '';
   const fit    = ki.fit || '';
   const size   = ki.size_corrected || ki.groesse || '';
-  const cond   = ki.condition || ki.zustand || '';
+  const cond   = formatCondition(ki.condition ?? ki.zustand);
   const title  = ki.titel_vorschlag || '—';
   const tags   = Array.isArray(ki.tags) ? ki.tags.join(', ') : (ki.tags || '');
   const weight = ki.shipping_weight_kg ? `${ki.shipping_weight_kg} kg` : '';
@@ -1866,6 +1868,33 @@ function stepInput(id, delta) {
   syncMeasToDescription(id);
 }
 
+function formatCondition(val) {
+  const n = parseFloat(val);
+  if (isNaN(n)) return null;
+  return n >= 10 ? 'top' : `${n}/10`;
+}
+
+function conditionToNum(val) {
+  if (typeof val === 'number') return Math.round(Math.min(10, Math.max(0.5, val)) * 2) / 2;
+  const map = { 'top': 10, 'very good': 9, 'good': 8, 'acceptable': 6.5 };
+  return map[String(val).toLowerCase().trim()] ?? null;
+}
+
+function stepCondition(delta) {
+  const el  = document.getElementById('m-condition');
+  const val = parseFloat(el.value) || 8;
+  el.value  = Math.min(10, Math.max(0.5, Math.round((val + delta) * 2) / 2));
+  syncConditionToDescription();
+}
+
+function syncConditionToDescription() {
+  const desc = document.getElementById('m-desc');
+  if (!desc) return;
+  const raw     = document.getElementById('m-condition').value;
+  const display = raw ? formatCondition(raw) : '—';
+  desc.value    = desc.value.replace(/^(Condition:\s*).*$/m, `$1${display} 🧤`);
+}
+
 const MEAS_DESC_LABELS = {
   'm-len':        'Length',
   'm-waist':      'Waist',
@@ -1897,7 +1926,7 @@ function updateMeasViewer() {
   const nextIdx   = (currentMeasImgIdx + 1) % currentMeasImages.length;
   btn.textContent = '▶ Weiter';
 
-  fields.forEach((f, i) => f.classList.toggle('meas-field-active', i === currentMeasImgIdx));
+  fields.forEach(f => f.classList.remove('meas-field-active'));
 }
 
 function nextMeasImage() {
@@ -1917,23 +1946,27 @@ function openProductModal(idx) {
   document.getElementById('m-model').value      = ki.modell || '';
   document.getElementById('m-fit').value        = ki.fit || '';
   document.getElementById('m-size').value       = ki.size_corrected || ki.groesse || '';
-  document.getElementById('m-condition').value  = ki.condition || ki.zustand || '';
-  document.getElementById('m-wash').value       = ki.wash_details || '';
+  document.getElementById('m-condition').value  = 9;
+  document.getElementById('m-wash').value       = 'cool denim wash';
   document.getElementById('m-sku').value        = ki.sku || '';
   document.getElementById('m-country').value    = ki.country_of_origin || '';
   document.getElementById('m-len').value        = ki.measurements?.length_cm || '';
   document.getElementById('m-waist').value      = ki.measurements?.waist_cm || '';
   document.getElementById('m-legopening').value = ki.measurements?.leg_opening_cm || '';
   document.getElementById('m-price').value      = ki.preis_eur ?? '';
-  document.getElementById('m-tags').value       = Array.isArray(ki.tags) ? ki.tags.join(', ') : (ki.tags || '');
-  document.getElementById('m-desc').value       = ki.beschreibung || '';
+  const rawTags = Array.isArray(ki.tags) ? ki.tags : (ki.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+  const cleanTags = rawTags.map(t => t.replace(/^(W\d+)\/L\d+$/i, '$1'));
+  document.getElementById('m-tags').value       = cleanTags.join(', ');
+  const rawDesc = ki.beschreibung || '';
+  document.getElementById('m-desc').value = rawDesc.replace(/^(Details:\s*).*$/m, '$1cool denim wash 🔍');
+  syncConditionToDescription();
 
   // Confidence warning
   const warn = document.getElementById('modalWarn');
   warn.style.display = ki.konfidenz === 'niedrig' ? '' : 'none';
 
   if (!p._allImages) p._allImages = p.allImages?.length ? [...p.allImages] : [...(p.images || [])];
-  if (!p.shopifyImages) p.shopifyImages = new Set(p.images || []);
+  if (!(p.shopifyImages instanceof Set)) p.shopifyImages = new Set(p.images || []);
   const strip = document.getElementById('modalThumbStrip');
   strip.style.display = p._allImages.length ? '' : 'none';
   refreshModalStrip(idx);
@@ -2000,7 +2033,7 @@ function closeModal() {
   ki.fit              = document.getElementById('m-fit').value;
   ki.size_corrected   = document.getElementById('m-size').value;
   ki.groesse          = ki.size_corrected;
-  ki.condition        = document.getElementById('m-condition').value;
+  ki.condition        = parseFloat(document.getElementById('m-condition').value) || null;
   ki.zustand          = ki.condition;
   ki.wash_details     = document.getElementById('m-wash').value;
   ki.sku              = document.getElementById('m-sku').value;
@@ -2059,6 +2092,7 @@ async function shopifySingle(idx) {
           condition:       ki.condition || ki.zustand,
           taxable:         ki.taxable ?? false,
           tags:            ki.tags,
+          sku:             ki.sku || null,
           suggested_price: ki.preis_eur || 0,
           images:          p.images || [],
         }

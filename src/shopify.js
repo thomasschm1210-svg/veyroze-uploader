@@ -28,12 +28,17 @@ async function uploadProductImage(shop, token, productId, imagePath) {
   return data.image;
 }
 
+async function getLocationId(shop, token, name) {
+  const data = await shopifyRequest(shop, token, 'GET', 'locations.json');
+  return data.locations?.find(l => l.name === name)?.id ?? null;
+}
+
 // Erstellt ein Draft-Produkt in Shopify und lädt alle Bilder hoch
 export async function createShopifyDraft(productData, imageFiles, shop, token) {
   const {
     titel_vorschlag, beschreibung,
     marke, modell, size_corrected, condition, taxable,
-    tags, suggested_price,
+    tags, sku, suggested_price,
   } = productData;
 
   const title    = titel_vorschlag || [marke, modell, size_corrected].filter(Boolean).join(' ') || 'Jeans';
@@ -49,19 +54,36 @@ export async function createShopifyDraft(productData, imageFiles, shop, token) {
       product_type: 'Jeans',
       status: 'draft',
       tags: tagStr,
-      taxable: taxable ?? false,
       variants: [{
         price,
+        sku: sku || '',
         inventory_management: 'shopify',
-        inventory_quantity: 1,
         option1: size_corrected || 'Default',
-        taxable: taxable ?? false,
+        taxable: false,
       }]
     }
   });
 
-  const productId = created.product.id;
+  const productId       = created.product.id;
+  const inventoryItemId = created.product.variants[0]?.inventory_item_id;
   console.log(`  Shopify Draft erstellt: ${title} (ID: ${productId})`);
+
+  // Inventar auf 1 setzen für Standort "Veyroze UG"
+  try {
+    const locationId = await getLocationId(shop, token, 'Veyroze UG');
+    if (locationId && inventoryItemId) {
+      await shopifyRequest(shop, token, 'POST', 'inventory_levels/set.json', {
+        inventory_item_id: inventoryItemId,
+        location_id:       locationId,
+        available:         1,
+      });
+      console.log(`  Inventar gesetzt: 1 × Veyroze UG`);
+    } else {
+      console.warn(`  Inventar-Standort "Veyroze UG" nicht gefunden`);
+    }
+  } catch (e) {
+    console.warn(`  Inventar-Set fehlgeschlagen: ${e.message}`);
+  }
 
   // Bilder hochladen
   for (const imgPath of imageFiles) {
