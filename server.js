@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { runPipeline } from './src/pipeline.js';
 import { groupImages }  from './src/groupImages.js';
 import { initRegistry } from './src/deduplicator.js';
+import { createShopifyDraft } from './src/shopify.js';
 import { securityCheck, securityHeaders } from './src/security/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -180,6 +181,33 @@ app.post('/api/run', express.json(), async (req, res) => {
     });
   } catch (err) {
     sendEvent(runId, 'error', { msg: err.message });
+  }
+});
+
+// ── POST /api/shopify/:runId/:productIdx ──────────────────────────────────
+app.post('/api/shopify/:runId/:productIdx', express.json(), async (req, res) => {
+  const { runId, productIdx } = req.params;
+  const shop  = process.env.SHOPIFY_SHOP;
+  const token = process.env.SHOPIFY_TOKEN;
+
+  if (!shop || !token) {
+    return res.status(500).json({ error: 'SHOPIFY_SHOP oder SHOPIFY_TOKEN fehlt in .env' });
+  }
+
+  const { product } = req.body;
+  if (!product) return res.status(400).json({ error: 'product-Daten fehlen im Body' });
+
+  const runDir = path.join(UPLOAD_DIR, runId);
+  const imageFiles = (product.images || []).map(url => {
+    const rel = url.replace(`/api/image/${runId}/`, '');
+    return path.join(runDir, rel);
+  }).filter(p => fs.existsSync(p));
+
+  try {
+    const result = await createShopifyDraft(product, imageFiles, shop, token);
+    res.json({ ok: true, shopifyId: result.id, title: result.title, url: result.url });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
