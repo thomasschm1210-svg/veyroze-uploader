@@ -115,46 +115,38 @@ app.post('/api/run', express.json(), async (req, res) => {
   res.json({ started: true });
 
   try {
-    let groups;
+    let flatImages;
     if (rawGroups?.length) {
-      groups = rawGroups
-        .map(g => g
-          .map(name => path.join(runDir, name))
-          .filter(p => fs.existsSync(p))
-        )
-        .filter(g => g.length > 0);
+      flatImages = rawGroups.flat()
+        .map(name => path.join(runDir, name))
+        .filter(p => fs.existsSync(p));
     } else {
       const { groups: g } = await groupImages(runDir);
-      groups = g;
+      flatImages = g.flat();
     }
 
-    if (!groups.length) {
+    if (!flatImages.length) {
       sendEvent(runId, 'error', { msg: 'Keine Bilder verarbeitbar' });
       return;
     }
 
-    sendEvent(runId, 'start', { groups: groups.length, images: groups.flat().length });
+    sendEvent(runId, 'start', { images: flatImages.length });
 
     initRegistry(runDir);
 
+    const toUrl = (f) => f && fs.existsSync(f)
+      ? `/api/image/${runId}/${path.relative(runDir, f).split(path.sep).join('/')}`
+      : null;
+
     const mapPaths = (p) => ({
       ...p,
-      thumbnail: p.thumbnail && fs.existsSync(p.thumbnail)
-        ? `/api/image/${runId}/${path.relative(runDir, p.thumbnail).split(path.sep).join('/')}`
-        : null,
-      images: (p.images || []).filter(f => fs.existsSync(f)).map(f =>
-        `/api/image/${runId}/${path.relative(runDir, f).split(path.sep).join('/')}`
-      ),
-      allImages: (p.allImages || []).filter(f => fs.existsSync(f)).map(f =>
-        `/api/image/${runId}/${path.relative(runDir, f).split(path.sep).join('/')}`
-      ),
-      measurementImages: (p.measurementImages || []).filter(f => fs.existsSync(f)).map(f =>
-        `/api/image/${runId}/${path.relative(runDir, f).split(path.sep).join('/')}`
-      ),
+      thumbnail: toUrl(p.thumbnail),
+      images: (p.images || []).map(toUrl).filter(Boolean),
+      allImages: (p.allImages || []).map(toUrl).filter(Boolean),
+      measurementImages: (p.measurementImages || []).map(toUrl).filter(Boolean),
     });
 
-    const result = await runPipeline(groups, runDir, {
-      separators: [],
+    const result = await runPipeline(flatImages, runDir, {
       ProgressClass: makeProgressClass(runId),
       folderName: folderName || '',
       onProduct: (p) => sendEvent(runId, 'product-complete', mapPaths(p)),
@@ -164,8 +156,28 @@ app.post('/api/run', express.json(), async (req, res) => {
       ? `/api/csv/${runId}/${path.basename(result.csvPath)}`
       : null;
 
-    const products = (result.products || []).map(mapPaths);
-    sendEvent(runId, 'done', { csvUrl: csvRel, stats: result.stats, products });
+    const products = (result.products || []).map(mapPaths).map(p => ({
+      sku:        p.sku,
+      imageCount: p.images.length,
+      images:     p.images,
+      aiData:     p.ki,
+      index:      p.index,
+      label:      p.label,
+      thumbnail:  p.thumbnail,
+      allImages:  p.allImages,
+      measurementImages: p.measurementImages,
+      ki:         p.ki,
+      isReview:   p.isReview,
+    }));
+
+    const totalImages = products.reduce((s, p) => s + p.imageCount, 0);
+    sendEvent(runId, 'done', {
+      csvUrl: csvRel,
+      stats:  result.stats,
+      products,
+      totalProducts: products.length,
+      totalImages,
+    });
   } catch (err) {
     sendEvent(runId, 'error', { msg: err.message });
   }

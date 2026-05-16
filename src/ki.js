@@ -96,21 +96,18 @@ async function toKiInlinePart(filePath) {
   return { inlineData: { data: buf.toString('base64'), mimeType: 'image/jpeg' } };
 }
 
-// For separator/SKU detection: normalise + sharpen for handwritten digit readability
+// Für die Trennbild-/SKU-Erkennung reicht eine deutlich kleinere Vorschau —
+// handschriftliche Ziffern sind auch bei 512px noch klar lesbar, und der Payload
+// schrumpft um ~97% gegenüber Originalauflösung. Wichtig für große Mengen-Uploads.
 async function toPreprocessedInlinePart(filePath) {
-  const tmpPath = path.join(os.tmpdir(), `vsep_${Date.now()}_${path.basename(filePath)}.jpg`);
-  try {
-    await sharp(filePath)
-      .rotate()
-      .normalise()
-      .sharpen()
-      .jpeg({ quality: 90 })
-      .toFile(tmpPath);
-    const data = (await fs.promises.readFile(tmpPath)).toString('base64');
-    return { inlineData: { data, mimeType: 'image/jpeg' } };
-  } finally {
-    if (fs.existsSync(tmpPath)) try { fs.unlinkSync(tmpPath); } catch {}
-  }
+  const buf = await sharp(filePath)
+    .rotate()
+    .resize(512, 512, { fit: 'inside', withoutEnlargement: true })
+    .normalise()
+    .sharpen()
+    .jpeg({ quality: 72 })
+    .toBuffer();
+  return { inlineData: { data: buf.toString('base64'), mimeType: 'image/jpeg' } };
 }
 
 const COUNTRY_DE = {
@@ -181,6 +178,9 @@ function buildJeansDescription(brand, model, sizeW, sizeL, washDetails, conditio
 }
 
 const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest'];
+// Separator-Erkennung ist eine simple Binärklassifikation + Lesen einer kurzen Ziffernfolge —
+// flash-lite ist hier 3–5× schneller als flash und genauso treffsicher.
+const SEP_MODELS = ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest'];
 const RETRYABLE = new Set([429, 503]);
 const MAX_ATTEMPTS = 3;
 
@@ -211,26 +211,26 @@ async function callGemini(imageParts) {
 
 const SEP_BATCH_PROMPT = `You receive multiple images in order. For EACH image, determine if it is a SEPARATOR PHOTO.
 
-A separator photo shows a translucent/frosted plastic bag (Tüte/Polybeutel, often with a small hanging hole) OR a piece of paper/card, with a HANDWRITTEN 5-digit inventory number on it (in marker or pencil).
+A separator photo shows a translucent/frosted plastic bag (Tüte/Polybeutel, often with a small hanging hole) OR a piece of paper/card, with a HANDWRITTEN inventory code on it (in black marker/Edding or pencil).
 
-IMPORTANT: The photo may have been taken with the phone rotated or upside-down. The handwritten number may appear at any angle (90°, 180°, 270° rotated). Examine all orientations carefully — rotate the image mentally if needed to read the digits.
+The inventory code is short and alphanumeric — typically letters followed by digits (e.g. "LI8005", "BR4421"), or pure digits (e.g. "48005"). Length is typically 4–8 characters.
+
+IMPORTANT: The photo may have been taken with the phone rotated or upside-down. The handwritten code may appear at any angle (90°, 180°, 270° rotated). Examine all orientations carefully — rotate the image mentally if needed to read the characters.
 
 Return ONLY a JSON array (no markdown, no prose), one object per input image in original order:
-[{"i":0,"sku":"48005"},{"i":1,"sku":null},...]
+[{"i":0,"sku":"LI8005"},{"i":1,"sku":null},...]
 
 Rules:
-- "sku" must be a string of EXACTLY 5 digits, or null.
+- "sku" must be the handwritten code uppercased and trimmed (no spaces), or null.
 - Numbers printed on garment care tags, brand patches, size labels, rulers/tape measures or any printed text are NOT separators — return null for those.
-- Only HANDWRITTEN numbers on a plastic bag or paper count.
-- The digit count must be exactly 5 — not 4, not 6. If you cannot confirm 5 digits with confidence, return null.`;
+- Only HANDWRITTEN codes on a plastic bag or paper count.
+- If you cannot confidently read the code, return null.`;
 
-export async function detectSeparatorsBatch(imagePaths) {
-  if (!genAI || !imagePaths.length) return null;
-  let parts;
-  try { parts = await Promise.all(imagePaths.map(toPreprocessedInlinePart)); }
-  catch { return null; }
+const SEP_CHUNK_SIZE        = 12;
+const SEP_CHUNK_CONCURRENCY = 5;
 
-  for (const modelName of MODELS) {
+async function detectSeparatorsChunk(parts) {
+  for (const modelName of SEP_MODELS) {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
         const model  = genAI.getGenerativeModel({ model: modelName });
@@ -239,11 +239,14 @@ export async function detectSeparatorsBatch(imagePaths) {
         const match  = text.match(/\[[\s\S]*\]/);
         if (!match) return null;
         const arr = JSON.parse(match[0]);
-        return imagePaths.map((_, i) => {
+        return parts.map((_, i) => {
           const item = arr.find(a => a && a.i === i);
           const sku  = item?.sku;
-          if (sku != null && /^\d{5}$/.test(String(sku).trim()))
-            return { isSeparator: true, sku: String(sku).trim() };
+          if (sku != null) {
+            const cleaned = String(sku).trim().toUpperCase().replace(/\s+/g, '');
+            if (/^[A-Z]{0,4}\d{3,8}$/.test(cleaned))
+              return { isSeparator: true, sku: cleaned };
+          }
           return { isSeparator: false, sku: null };
         });
       } catch (err) {
@@ -259,6 +262,41 @@ export async function detectSeparatorsBatch(imagePaths) {
     }
   }
   return null;
+}
+
+export async function detectSeparatorsBatch(imagePaths, onChunkDone) {
+  if (!genAI || !imagePaths.length) return null;
+
+  const chunks = [];
+  for (let i = 0; i < imagePaths.length; i += SEP_CHUNK_SIZE) {
+    chunks.push({ start: i, paths: imagePaths.slice(i, i + SEP_CHUNK_SIZE) });
+  }
+
+  const results = new Array(imagePaths.length);
+  let nextChunk = 0;
+  let chunksDone = 0;
+
+  async function worker() {
+    while (nextChunk < chunks.length) {
+      const { start, paths } = chunks[nextChunk++];
+      let parts;
+      try { parts = await Promise.all(paths.map(toPreprocessedInlinePart)); }
+      catch { parts = null; }
+      const chunkResult = parts ? await detectSeparatorsChunk(parts) : null;
+      for (let k = 0; k < paths.length; k++) {
+        results[start + k] = chunkResult?.[k] ?? { isSeparator: false, sku: null };
+      }
+      chunksDone++;
+      onChunkDone?.(chunksDone, chunks.length, paths.length);
+    }
+  }
+
+  await Promise.all(Array.from(
+    { length: Math.min(SEP_CHUNK_CONCURRENCY, chunks.length) },
+    worker,
+  ));
+
+  return results;
 }
 
 export async function detectSeparatorImage(imagePath) {
@@ -320,17 +358,37 @@ export async function mockKiAnalyze(imageFiles, opts = {}) {
 
   const utilitySet = new Set(Array.isArray(utility_image_indices) ? utility_image_indices : []);
   const orderList  = Array.isArray(product_image_order)
-    ? product_image_order.filter(i => Number.isInteger(i) && i >= 0 && i < files.length)
+    ? product_image_order.filter(i => Number.isInteger(i) && i >= 0 && i < files.length && !utilitySet.has(i))
     : [];
-  const productFiles = orderList.length > 0
-    ? orderList.map(i => files[i]).filter(Boolean)
-    : files.filter((_, i) => !utilitySet.has(i));
 
-  // SKU must be exactly 5 digits — reject anything else regardless of what Gemini returned
-  const validSku = (typeof sku === 'string' || typeof sku === 'number')
-    && /^\d{5}$/.test(String(sku).trim())
-    ? String(sku).trim()
-    : null;
+  // Indizes von `files` (KI-Subset) auf `imageFiles` (volles Set der Gruppe) mappen.
+  // So bleiben auch bei >8 Fotos/Produkt alle hochgeladenen Bilder im Output.
+  const filesToInputIdx = files.map(f => imageFiles.indexOf(f));
+  const inputUtilitySet = new Set(
+    [...utilitySet].map(i => filesToInputIdx[i]).filter(i => i >= 0)
+  );
+
+  // KI-Order zuerst (Front, Back, Badge, Patch), dann alles übrige außer Utility.
+  // KI's product_image_order ist nur Reihenfolge-Hinweis, nicht Filter — sonst gingen
+  // Label/Maßband-Fotos verloren, die der Kunde im Output sehen will.
+  const orderedInputIdx = orderList
+    .map(i => filesToInputIdx[i])
+    .filter(i => i >= 0);
+  const seen = new Set(orderedInputIdx);
+  const remaining = imageFiles
+    .map((_, i) => i)
+    .filter(i => !inputUtilitySet.has(i) && !seen.has(i));
+  const productFiles = [...orderedInputIdx, ...remaining]
+    .map(i => imageFiles[i])
+    .filter(Boolean);
+
+  // SKU: vom Trennbild-Detektor übernommen, sonst aus dem KI-Ergebnis (4–8 Zeichen alphanumerisch)
+  const overrideRaw = typeof opts.sku === 'string' ? opts.sku.trim().toUpperCase() : '';
+  const overrideSku = /^[A-Z]{0,4}\d{3,8}$/.test(overrideRaw) ? overrideRaw : null;
+  const validSku = overrideSku
+    || ((typeof sku === 'string' || typeof sku === 'number') && /^[A-Z]{0,4}\d{3,8}$/i.test(String(sku).trim())
+        ? String(sku).trim().toUpperCase()
+        : null);
 
   // Längenkorrektur: gemessene Länge < 100cm → L-Größe nach unten korrigieren
   const correctedL    = lengthLabel(size_l, measurements.length_cm);
@@ -389,6 +447,6 @@ export async function mockKiAnalyze(imageFiles, opts = {}) {
     shipping_weight_kg: weight,
     hs_code:         '6309000',
     product_images:  productFiles,
-    measurement_images: measIdx.map(i => files[i]).filter(Boolean),
+    measurement_images: measIdx.map(i => imageFiles[filesToInputIdx[i]] ?? files[i]).filter(Boolean),
   };
 }
