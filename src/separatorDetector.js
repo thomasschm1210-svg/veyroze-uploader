@@ -1,67 +1,83 @@
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import sharp from 'sharp';
-import path from 'path';
-import { detectSeparatorImage } from './ki.js';
-import { detectSkuNumber } from './ocr.js';
 
-const THRESHOLD = 0.55;
+const genAI = process.env.GEMINI_API_KEY
+  ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
+  : null;
 
-export async function isSeparator(filePath, keyword = 'trenner') {
-  if (path.basename(filePath).toLowerCase().includes(keyword.toLowerCase()))
-    return { isSeparator: true, sku: null };
+const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash-latest'];
+const RETRYABLE = new Set([429, 503]);
+const MAX_ATTEMPTS = 3;
+const RETRY_DELAY_MS = 1000;
 
-  // Gemini Vision — zuverlässigste Methode für Frostbeutel mit Marker-Schrift
-  const geminiResult = await detectSeparatorImage(filePath);
-  if (geminiResult.isSeparator) return geminiResult;
+const SKU_PATTERN = /^[A-Za-z]{0,4}\d{3,8}$/;
 
-  // OCR-Fallback (greift wenn kein Gemini API Key gesetzt)
-  try {
-    const sku = await detectSkuNumber(filePath);
-    if (sku) return { isSeparator: true, sku };
-  } catch { /* weiter */ }
+const PROMPT = `You receive ONE photo. Decide if it is a SEPARATOR PHOTO that starts a new product.
 
-  // Visuelle Heuristik als letzter Fallback (für leere weiße Seiten)
-  try {
-    const scores = await Promise.all([
-      scoreBrightness(filePath),
-      scoreColorVariance(filePath),
-      scoreEdgeDensity(filePath),
-    ]);
-    const weighted = scores[0] * 0.4 + scores[1] * 0.3 + scores[2] * 0.3;
-    return { isSeparator: weighted >= THRESHOLD, sku: null };
-  } catch {
-    return { isSeparator: false, sku: null };
+A SEPARATOR PHOTO has ALL of these:
+1. The dominant subject is a transparent or milky-white plastic bag (Polyethylen-Folie, Polybeutel — often with a small hanging hole at the top).
+2. On the bag surface, a HANDWRITTEN inventory code is visible, drawn in black marker (Edding) or pencil.
+3. NO jeans product, NO ruler/tape measure, NO laundry care tag in the focus of the shot.
+
+The inventory code (SKU) is typically a short alphanumeric string such as "LI8005", "48005", "A1234" — usually 4 to 8 characters, letters followed by digits, or pure digits. It is HANDWRITTEN, never printed.
+
+The photo may be rotated. Read the code at any orientation.
+
+Return ONLY a JSON object, no markdown, no prose:
+{"isSeparator": true|false, "sku": "LI8005" | null}
+
+Rules:
+- If isSeparator is true, sku MUST be the handwritten code as you read it, uppercased, no spaces.
+- Numbers printed on care labels, brand patches, size tags, barcodes or any garment text do NOT count — return isSeparator: false.
+- If you see a plastic bag but cannot read a handwritten code, return isSeparator: false and sku: null.`;
+
+async function toInlinePart(imagePath) {
+  const buf = await sharp(imagePath)
+    .rotate()
+    .normalise()
+    .sharpen()
+    .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 88 })
+    .toBuffer();
+  return { inlineData: { data: buf.toString('base64'), mimeType: 'image/jpeg' } };
+}
+
+function normaliseSku(raw) {
+  if (raw == null) return null;
+  const cleaned = String(raw).trim().toUpperCase().replace(/\s+/g, '');
+  return SKU_PATTERN.test(cleaned) ? cleaned : null;
+}
+
+export async function detectSeparator(imagePath) {
+  if (!genAI) return { isSeparator: false, sku: null };
+
+  let part;
+  try { part = await toInlinePart(imagePath); }
+  catch { return { isSeparator: false, sku: null }; }
+
+  for (const modelName of MODELS) {
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const model  = genAI.getGenerativeModel({ model: modelName });
+        const result = await model.generateContent([PROMPT, part]);
+        const text   = result.response.text().trim();
+        const match  = text.match(/\{[\s\S]*\}/);
+        if (!match) return { isSeparator: false, sku: null };
+        const obj = JSON.parse(match[0]);
+        const sku = normaliseSku(obj.sku);
+        if (obj.isSeparator === true && sku) return { isSeparator: true, sku };
+        return { isSeparator: false, sku: null };
+      } catch (err) {
+        const status = err?.status;
+        if (status === 404) break;
+        if (RETRYABLE.has(status) && attempt < MAX_ATTEMPTS) {
+          await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+          continue;
+        }
+        if (RETRYABLE.has(status)) break;
+        return { isSeparator: false, sku: null };
+      }
+    }
   }
-}
-
-async function scoreBrightness(filePath) {
-  const { data } = await sharp(filePath)
-    .resize(64, 64, { fit: 'fill' })
-    .grayscale()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-  const avg = data.reduce((s, v) => s + v, 0) / data.length;
-  return Math.max(0, (avg - 160) / 95);
-}
-
-async function scoreColorVariance(filePath) {
-  const { data } = await sharp(filePath)
-    .resize(64, 64, { fit: 'fill' })
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-  const len = data.length;
-  const mean = data.reduce((s, v) => s + v, 0) / len;
-  const variance = data.reduce((s, v) => s + (v - mean) ** 2, 0) / len;
-  return Math.max(0, 1 - Math.sqrt(variance) / 20);
-}
-
-async function scoreEdgeDensity(filePath) {
-  const { data, info } = await sharp(filePath)
-    .resize(128, 128, { fit: 'fill' })
-    .grayscale()
-    .convolve({ width: 3, height: 3, kernel: [-1, -1, -1, -1, 8, -1, -1, -1, -1] })
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-  const edgePixels = data.filter(v => v > 30).length;
-  const density = edgePixels / (info.width * info.height);
-  return Math.max(0, 1 - density / 0.03);
+  return { isSeparator: false, sku: null };
 }

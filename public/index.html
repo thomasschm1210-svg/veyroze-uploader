@@ -633,6 +633,14 @@
     .ki-badge-type { background: var(--bg-3); color: var(--text-0); border: 1px solid var(--border); }
     .ki-badge-review { background: var(--yellow-bg); color: var(--yellow); }
     .ki-badge-ok { background: var(--green-bg); color: var(--green); }
+    .ki-badge-sku {
+      background: var(--bg-3);
+      color: var(--text-0);
+      border: 1px solid var(--border);
+      font-weight: 700;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: 0.04em;
+    }
 
     .ki-brand {
       font-size: 18px; font-weight: 600;
@@ -1178,11 +1186,11 @@ function togglePlug() {
 }
 
 
-const PHASES = ['Duplikate', 'Komprimieren', 'Analyse', 'KI-Analyse'];
+const PHASES = ['Trennbilder', 'Duplikate', 'Komprimieren', 'KI-Analyse'];
 const PHASE_LABELS = {
+  'Trennbilder':  'Separator detection',
   'Duplikate':    'Deduplication',
   'Komprimieren': 'Compression',
-  'Analyse':      'OCR & Analysis',
   'KI-Analyse':   'AI Recognition',
 };
 
@@ -1506,21 +1514,75 @@ function makeSortable(container, grp, gi) {
 }
 
 // ── Upload ───────────────────────────────────────────────────────────────────
+const UPLOAD_MAX_PX  = 1600;
+const UPLOAD_QUALITY = 0.82;
+const COMPRESS_CONCURRENCY = 4;
+
+async function compressForUpload(blob, name) {
+  try {
+    const bitmap = await createImageBitmap(blob);
+    const scale  = Math.min(1, UPLOAD_MAX_PX / Math.max(bitmap.width, bitmap.height));
+    if (scale >= 1 && blob.size < 600 * 1024 && /^image\/jpeg$/i.test(blob.type)) {
+      bitmap.close?.();
+      return { blob, name };
+    }
+    const w = Math.round(bitmap.width  * scale);
+    const h = Math.round(bitmap.height * scale);
+    const useOffscreen = typeof OffscreenCanvas !== 'undefined';
+    const canvas = useOffscreen
+      ? new OffscreenCanvas(w, h)
+      : Object.assign(document.createElement('canvas'), { width: w, height: h });
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close?.();
+    const out = useOffscreen
+      ? await canvas.convertToBlob({ type: 'image/jpeg', quality: UPLOAD_QUALITY })
+      : await new Promise(res => canvas.toBlob(res, 'image/jpeg', UPLOAD_QUALITY));
+    const outName = name.replace(/\.(heic|heif|png|webp|tiff?|bmp)$/i, '.jpg');
+    return { blob: out, name: outName.endsWith('.jpg') || outName.endsWith('.jpeg') ? outName : outName + '.jpg' };
+  } catch {
+    return { blob, name };
+  }
+}
+
+async function compressAllForUpload(items, onProgress) {
+  const results = new Array(items.length);
+  let next = 0;
+  let done = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await compressForUpload(items[i].blob, items[i].name || 'photo.jpg');
+      done++;
+      onProgress?.(done, items.length);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(COMPRESS_CONCURRENCY, items.length) }, worker));
+  return results;
+}
+
 async function startUpload() {
   const allFiles = groups.flat();
   if (!allFiles.length) return;
 
   runId = `run_${Date.now()}`;
   showScreen('screen-progress');
-  document.getElementById('overallLabel').textContent = 'Uploading';
+  document.getElementById('overallLabel').textContent = 'Vorverarbeitung';
+  setOverall(2);
 
+  const compressed = await compressAllForUpload(allFiles, (done, total) => {
+    setOverall(2 + Math.round((done / total) * 8));
+    document.getElementById('overallLabel').textContent = `Vorverarbeitung (${done}/${total})`;
+  });
+
+  document.getElementById('overallLabel').textContent = 'Uploading';
   const fd = new FormData();
   fd.append('runId', runId);
-  for (const item of allFiles) {
-    fd.append('images', item.blob, item.name || 'photo.jpg');
+  for (const item of compressed) {
+    fd.append('images', item.blob, item.name);
   }
 
-  setOverall(5);
+  setOverall(10);
   let uploadedFiles;
   try {
     const res = await fetch('/api/upload', { method: 'POST', body: fd });
@@ -1553,7 +1615,7 @@ function startSSE() {
   es.addEventListener('start', e => {
     const d = JSON.parse(e.data);
     document.getElementById('progressSubtitle').textContent =
-      `${d.groups} product${d.groups !== 1 ? 's' : ''} · ${d.images} image${d.images !== 1 ? 's' : ''}`;
+      `${d.images} Foto${d.images !== 1 ? 's' : ''} · Trennbilder werden erkannt…`;
     initPhases();
   });
 
@@ -1587,8 +1649,9 @@ function startSSE() {
     }
     const list = document.getElementById('productList');
     renderKiCard(p, allProducts.length - 1, list);
+    const photoSum = allProducts.reduce((s, x) => s + (x.images?.length || 0), 0);
     document.getElementById('productsSubtitle').textContent =
-      `${allProducts.length} product${allProducts.length !== 1 ? 's' : ''} · processing…`;
+      `${allProducts.length} Produkt${allProducts.length !== 1 ? 'e' : ''} erkannt aus ${photoSum} Foto${photoSum !== 1 ? 's' : ''} · verarbeitet…`;
   });
 
   es.addEventListener('done', e => {
@@ -1721,9 +1784,10 @@ function renderFilteredList() {
 
   const subtitle = document.getElementById('productsSubtitle');
   if (currentFilter === 'all') {
-    subtitle.textContent = `${allProducts.length} product${allProducts.length !== 1 ? 's' : ''} ready for review`;
+    const photoSum = allProducts.reduce((s, x) => s + (x.images?.length || 0), 0);
+    subtitle.textContent = `${allProducts.length} Produkt${allProducts.length !== 1 ? 'e' : ''} erkannt aus ${photoSum} Foto${photoSum !== 1 ? 's' : ''}`;
   } else {
-    subtitle.textContent = `${visible.length} product${visible.length !== 1 ? 's' : ''} · ${currentFilter}`;
+    subtitle.textContent = `${visible.length} Produkt${visible.length !== 1 ? 'e' : ''} · ${currentFilter}`;
   }
 
   if (visible.length === 0) {
@@ -1753,7 +1817,7 @@ function renderKiCard(p, idx, container) {
   const title  = ki.titel_vorschlag || '—';
   const tags   = Array.isArray(ki.tags) ? ki.tags.join(', ') : (ki.tags || '');
   const weight = ki.shipping_weight_kg ? `${ki.shipping_weight_kg} kg` : '';
-  const sku    = ki.sku ? `SKU: ${ki.sku}` : '';
+  const skuVal = p.sku || ki.sku || null;
   const m      = ki.measurements || {};
   const measStr = [
     m.length_cm    ? `L: ${m.length_cm}cm` : null,
@@ -1766,11 +1830,16 @@ function renderKiCard(p, idx, container) {
     ? `<span class="ki-badge" style="background:rgba(255,159,10,0.12);color:var(--yellow)">PLUG</span>`
     : `<span class="ki-badge" style="background:var(--bg-3);color:var(--text-2)">diff</span>`;
 
+  const skuBadge = skuVal
+    ? `<span class="ki-badge ki-badge-sku">${skuVal}</span>`
+    : '';
+
   card.innerHTML = `
     <div class="ki-card-top">
       ${thumbHtml}
       <div class="ki-meta">
         <div class="ki-badge-row">
+          ${skuBadge}
           <span class="ki-badge ki-badge-type">Jeans</span>
           <span class="ki-badge ${badgeCls}">${badgeText}</span>
           ${taxBadge}
@@ -1779,7 +1848,7 @@ function renderKiCard(p, idx, container) {
         <div class="ki-detail">${[fit, size].filter(Boolean).join(' · ')}</div>
         ${cond ? `<div class="ki-detail">Condition: <strong>${cond}</strong></div>` : ''}
         ${measStr ? `<div class="ki-detail" style="font-size:12px">${measStr}</div>` : ''}
-        <div class="ki-detail" style="margin-top:4px;font-size:12px;color:var(--text-2)">${[sku, weight, tags].filter(Boolean).join(' · ')}</div>
+        <div class="ki-detail" style="margin-top:4px;font-size:12px;color:var(--text-2)">${[weight, tags].filter(Boolean).join(' · ')}</div>
       </div>
       <span class="ki-card-arrow">›</span>
     </div>`;

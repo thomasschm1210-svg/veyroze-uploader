@@ -1,14 +1,15 @@
-import path   from 'path';
+import path from 'path';
 
-import { log }            from './logger.js';
-import { Progress }       from './progress.js';
-import { securityCheck }  from './security/index.js';
-import { checkDuplicate } from './deduplicator.js';
-import { compressGroup }  from './compressor.js';
-import { mockKiAnalyze }  from './ki.js';
-import { exportToCSV }    from './csvExport.js';
-import { FileRouter }     from './fileRouter.js';
-import { RunLogger }      from './runLogger.js';
+import { log }                  from './logger.js';
+import { Progress }             from './progress.js';
+import { securityCheck }        from './security/index.js';
+import { checkDuplicate }       from './deduplicator.js';
+import { compressGroup }        from './compressor.js';
+import { mockKiAnalyze }        from './ki.js';
+import { exportToCSV }          from './csvExport.js';
+import { FileRouter }           from './fileRouter.js';
+import { RunLogger }            from './runLogger.js';
+import { groupImagesBySeparator } from './groupImages.js';
 
 const KI_CONCURRENCY = 10;
 
@@ -25,34 +26,56 @@ async function withConcurrency(fns, limit) {
   return results;
 }
 
-export async function runPipeline(groups, baseDir, opts = {}) {
+export async function runPipeline(allImages, baseDir, opts = {}) {
   const ProgressClass = opts.ProgressClass ?? Progress;
   const ts     = Date.now();
   const router = new FileRouter(baseDir);
   const logger = new RunLogger(router.logPath(ts));
 
-  for (const sep of (opts.separators ?? [])) {
-    try {
-      router._moveOne(sep, path.join(router.verarbeitet, path.basename(sep)));
-    } catch { /* ignorieren */ }
-  }
+  const flat = Array.isArray(allImages[0]) ? allImages.flat() : allImages;
+  logger.stats.totalImages = flat.length;
+  logger.info(`Start: ${flat.length} Bild(er) — Auto-Trennbild-Erkennung aktiv`);
 
-  const allImages = groups.flat();
-  logger.stats.totalImages = allImages.length;
-  logger.info(`Start: ${groups.length} Gruppe(n), ${allImages.length} Bild(er)`);
-
-  const secUpload = await securityCheck({ phase: 'upload', imageFiles: allImages.map(p => ({ path: p })) });
+  const secUpload = await securityCheck({ phase: 'upload', imageFiles: flat.map(p => ({ path: p })) });
   if (secUpload.block) throw new Error(secUpload.body.error.message);
 
-  // ── Phase 1: Duplikate herausfiltern ────────────────────────────────────────
-  log.header(`PHASE 1 / 4  Duplikate prüfen (${allImages.length} Bilder)`);
-  const prog1 = new ProgressClass(allImages.length, 'Duplikate');
+  // ── Phase 1: Trennbilder erkennen + Gruppierung ─────────────────────────────
+  log.header(`PHASE 1 / 4  Trennbilder erkennen (${flat.length} Bilder)`);
+  const progSep = new ProgressClass(flat.length, 'Trennbilder');
+  progSep.setPhase('Trennbilder');
+
+  let lastDone = 0;
+  const detected = await groupImagesBySeparator(flat, (done, total, name) => {
+    const delta = done - lastDone;
+    lastDone = done;
+    if (delta <= 0) return;
+    for (let k = 0; k < delta; k++) {
+      progSep.tick(k === delta - 1 ? `${name} (${done}/${total})` : '');
+    }
+  });
+  progSep.done();
+  log.success(`${detected.length} Produkt(e) erkannt`);
+
+  const groups = detected.map(g => g.productImages).filter(g => g.length > 0);
+  const skuByGroupIndex = detected.filter(g => g.productImages.length > 0).map(g => g.sku);
+
+  if (groups.length === 0) {
+    log.warn('Keine Produktfotos nach Trennbild-Erkennung übrig');
+    const stats = logger.finalize(null);
+    return { csvPath: null, logPath: logger.path, stats, products: [] };
+  }
+
+  // ── Phase 2: Duplikate herausfiltern ────────────────────────────────────────
+  const dupTotal = groups.flat().length;
+  log.header(`PHASE 2 / 4  Duplikate prüfen (${dupTotal} Bilder)`);
+  const prog1 = new ProgressClass(dupTotal, 'Duplikate');
   prog1.setPhase('Duplikate');
   const cleanGroups = [];
+  const cleanSkus   = [];
 
-  for (const group of groups) {
+  for (let gi = 0; gi < groups.length; gi++) {
     const clean = [];
-    for (const f of group) {
+    for (const f of groups[gi]) {
       const { isDuplicate, originalPath } = checkDuplicate(f);
       if (isDuplicate) {
         router.moveToDuplicate(f, originalPath);
@@ -63,12 +86,15 @@ export async function runPipeline(groups, baseDir, opts = {}) {
       }
       prog1.tick(path.basename(f));
     }
-    if (clean.length > 0) cleanGroups.push(clean);
+    if (clean.length > 0) {
+      cleanGroups.push(clean);
+      cleanSkus.push(skuByGroupIndex[gi]);
+    }
   }
   prog1.done();
 
-  // ── Phase 2 + 3: Komprimieren → KI (Fließband, alle Produkte parallel) ───────
-  log.header(`PHASE 2+3 / 4  Komprimieren & KI (${cleanGroups.length} Produkte)`);
+  // ── Phase 3 + 4: Komprimieren → KI (Fließband, alle Produkte parallel) ──────
+  log.header(`PHASE 3 / 4  Komprimieren & KI (${cleanGroups.length} Produkte)`);
   const prog2    = new ProgressClass(cleanGroups.length, 'Komprimieren');
   const prog3    = new ProgressClass(cleanGroups.length || 1, 'KI-Analyse');
   prog2.setPhase('Komprimieren');
@@ -77,32 +103,41 @@ export async function runPipeline(groups, baseDir, opts = {}) {
 
   const taskFns = cleanGroups.map((group, i) =>
     async () => {
-      const groupLabel = `produkt-${String(i + 1).padStart(3, '0')}`;
-
-      const compStats = await compressGroup(group);
-      totalSavedMB += parseFloat(compStats.savedMB);
-      prog2.tick(`gespart: ${compStats.savedMB} MB`);
+      const sku        = cleanSkus[i];
+      const groupLabel = sku && !sku.startsWith('UNKNOWN_')
+        ? `produkt-${sku}`
+        : `produkt-${String(i + 1).padStart(3, '0')}`;
 
       if (!kiPhaseSet) { kiPhaseSet = true; prog3.setPhase('KI-Analyse'); }
 
       const secKi = await securityCheck({ phase: 'ki', ocrText: '' });
       if (secKi.block) {
         log.warn(`  KI übersprungen (Sicherheitsprüfung): ${groupLabel}`);
+        prog2.tick('blockiert');
         prog3.tick(groupLabel);
         return null;
       }
 
-      let ki;
-      try {
-        ki = await mockKiAnalyze(group, { folderName: opts.folderName || '' });
-      } catch (err) {
+      // Kompression und KI lesen unabhängig vom selben Pfad — parallel laufen lassen
+      const [compRes, kiRes] = await Promise.allSettled([
+        compressGroup(group),
+        mockKiAnalyze(group, { folderName: opts.folderName || '', sku }),
+      ]);
+
+      const compStats = compRes.status === 'fulfilled' ? compRes.value : { savedMB: '0' };
+      totalSavedMB += parseFloat(compStats.savedMB);
+      prog2.tick(`gespart: ${compStats.savedMB} MB`);
+
+      if (kiRes.status === 'rejected') {
+        const err = kiRes.reason;
         for (const f of group) {
           router.moveToError(f, err.message);
           logger.errorItem(f, err.message);
         }
-        prog3.tick(`[FEHLER] Gruppe ${i + 1}`);
+        prog3.tick(`[FEHLER] ${groupLabel}`);
         return null;
       }
+      const ki = kiRes.value;
 
       const isReview = ki.confidence === 'low';
       const confPct  = { high: 90, medium: 60, low: 30 }[ki.confidence] ?? 0;
@@ -120,7 +155,7 @@ export async function runPipeline(groups, baseDir, opts = {}) {
         }, group, groupLabel);
       }
 
-      const groupIdx = new Map(group.map((f, i) => [f, i]));
+      const groupIdx = new Map(group.map((f, idx) => [f, idx]));
       const remap = paths => (paths || []).map(f => finalPaths[groupIdx.get(f)]).filter(Boolean);
       const productImages = ki.product_images?.length ? remap(ki.product_images) : finalPaths;
       prog3.tick(ki.titel_vorschlag);
@@ -128,6 +163,7 @@ export async function runPipeline(groups, baseDir, opts = {}) {
       const product = {
         index: i + 1,
         label: groupLabel,
+        sku,
         thumbnail: productImages[0] || null,
         images: productImages,
         allImages: finalPaths,
