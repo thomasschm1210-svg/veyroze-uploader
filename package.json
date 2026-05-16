@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "eval": "node test/evalKi.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",

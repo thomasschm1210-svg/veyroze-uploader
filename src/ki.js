@@ -140,6 +140,11 @@ const COUNTRY_DE = {
   'Türkiye': 'Türkei', 'Ukraine': 'Ukraine',
   'United States': 'USA', 'United States of America': 'USA', 'USA': 'USA',
   'Vietnam': 'Vietnam',
+  'Rumanien':  'Rumänien',
+  'Turkei':    'Türkei',    'Tuerkei':    'Türkei',
+  'Sudkorea':  'Südkorea',  'Suedkorea':  'Südkorea',
+  'Agypten':   'Ägypten',   'Aegypten':   'Ägypten',
+  'Athiopien': 'Äthiopien', 'Aethiopien': 'Äthiopien',
 };
 
 function toGermanCountry(name) {
@@ -190,7 +195,10 @@ async function callGemini(imageParts) {
   for (const modelName of MODELS) {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
-        const model  = genAI.getGenerativeModel({ model: modelName });
+        const model  = genAI.getGenerativeModel({
+          model: modelName,
+          generationConfig: { temperature: 0 },
+        });
         const result = await model.generateContent([PROMPT, ...imageParts]);
         return result.response.text().trim();
       } catch (err) {
@@ -265,7 +273,7 @@ export async function detectSeparatorImage(imagePath) {
   return result?.[0] ?? { isSeparator: false, sku: null };
 }
 
-const MAX_KI_IMAGES = 8;
+const MAX_KI_IMAGES = 50;
 const LABEL_RE = /label|tag|badge|patch|etikett|waist|bund|ruler|mass|cm|meas/i;
 
 function selectKiImages(imageFiles) {
