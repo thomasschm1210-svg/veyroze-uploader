@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 async function shopifyRequest(shop, token, method, endpoint, body = null) {
-  const url = `https://${shop}/admin/api/2024-04/${endpoint}`;
+  const url = `https://${shop}/admin/api/2025-04/${endpoint}`;
   const res = await fetch(url, {
     method,
     headers: {
@@ -30,31 +30,32 @@ async function uploadProductImage(shop, token, productId, imagePath) {
 
 // Erstellt ein Draft-Produkt in Shopify und lädt alle Bilder hoch
 export async function createShopifyDraft(productData, imageFiles, shop, token) {
-  const { brand, model, size, category, condition, color, features, description, suggested_price } = productData;
+  const {
+    titel_vorschlag, beschreibung,
+    marke, modell, size_corrected, condition, taxable,
+    tags, suggested_price,
+  } = productData;
 
-  const title = [brand, model, size].filter(Boolean).join(' ');
-  const bodyHtml = `
-<p>${description}</p>
-<ul>
-${features.map(f => `<li>${f}</li>`).join('\n')}
-</ul>
-<p><strong>Zustand:</strong> ${condition} | <strong>Farbe:</strong> ${color}</p>
-`.trim();
+  const title    = titel_vorschlag || [marke, modell, size_corrected].filter(Boolean).join(' ') || 'Jeans';
+  const bodyHtml = beschreibung ? beschreibung.replace(/\n/g, '<br>') : '';
+  const price    = suggested_price ? parseFloat(suggested_price).toFixed(2) : '0.00';
+  const tagStr   = Array.isArray(tags) ? tags.join(', ') : (tags || '');
 
-  // Produkt als Draft anlegen (published: false)
   const created = await shopifyRequest(shop, token, 'POST', 'products.json', {
     product: {
       title,
       body_html: bodyHtml,
-      vendor: brand,
-      product_type: category,
+      vendor: marke || '',
+      product_type: 'Jeans',
       status: 'draft',
-      tags: [brand, category, condition, color, size].filter(Boolean).join(', '),
+      tags: tagStr,
+      taxable: taxable ?? false,
       variants: [{
-        price: suggested_price.toFixed(2),
+        price,
         inventory_management: 'shopify',
         inventory_quantity: 1,
-        option1: size || 'Default'
+        option1: size_corrected || 'Default',
+        taxable: taxable ?? false,
       }]
     }
   });
@@ -75,7 +76,7 @@ ${features.map(f => `<li>${f}</li>`).join('\n')}
   return {
     id: productId,
     title,
-    price: suggested_price,
+    price,
     url: `https://${shop}/admin/products/${productId}`
   };
 }

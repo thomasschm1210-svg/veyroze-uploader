@@ -2037,17 +2037,42 @@ function shopifyFromModal() {
   shopifySingle(idx);
 }
 
-// ── Mock Shopify ─────────────────────────────────────────────────────────────
-function shopifySingle(idx) {
-  const p     = allProducts[idx];
-  const ki    = p.ki || {};
-  const title = ki.titel_vorschlag || '—';
-  const price = ki.suggested_price || '—';
+// ── Shopify API ───────────────────────────────────────────────────────────────
+async function shopifySingle(idx) {
+  const p  = allProducts[idx];
+  const ki = p.ki || {};
 
-  p._shopifyDone = true;
-  renderSummary();
+  const btn = document.querySelector(`#ki-card-${idx} .btn-shopify`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Uploading…'; }
 
-  setTimeout(() => {
+  try {
+    const res = await fetch(`/api/shopify/${runId}/${idx}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        product: {
+          titel_vorschlag: ki.titel_vorschlag,
+          beschreibung:    ki.beschreibung,
+          marke:           ki.marke,
+          modell:          ki.modell,
+          size_corrected:  ki.size_corrected || ki.groesse,
+          condition:       ki.condition || ki.zustand,
+          taxable:         ki.taxable ?? false,
+          tags:            ki.tags,
+          suggested_price: ki.preis_eur || 0,
+          images:          p.images || [],
+        }
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Shopify-Fehler');
+
+    p._shopifyDone  = true;
+    p._shopifyUrl   = data.url;
+    p._shopifyTitle = data.title;
+    renderSummary();
+
     const list    = document.getElementById('productList');
     const oldCard = document.getElementById(`ki-card-${idx}`);
     if (oldCard) {
@@ -2059,19 +2084,17 @@ function shopifySingle(idx) {
         oldCard.remove();
       }
     }
-    showToast(`"${title}" (€${price}) — ready on Shopify`);
-  }, 800);
+    showToast(`"${data.title}" → Shopify Draft erstellt ✓`);
+  } catch (err) {
+    showToast(`Fehler: ${err.message}`);
+    if (btn) { btn.disabled = false; btn.textContent = 'Push to Shopify'; }
+  }
 }
 
 function shopifyAll() {
-  const pending = allProducts.filter(p => !p._shopifyDone);
+  const pending = allProducts.map((p, idx) => ({ p, idx })).filter(({ p }) => !p._shopifyDone);
   if (!pending.length) { showToast('All products already pushed'); return; }
-  let delay = 0;
-  allProducts.forEach((p, idx) => {
-    if (p._shopifyDone) return;
-    setTimeout(() => shopifySingle(idx), delay);
-    delay += 400;
-  });
+  pending.forEach(({ idx }, i) => setTimeout(() => shopifySingle(idx), i * 600));
 }
 
 // ── Guard against accidental page refresh ─────────────────────────────────────
