@@ -41,7 +41,7 @@ Die KI liest aus den Bildern:
 
 ### 3.2 Medien
 - Alle Fotos des Produkts werden hochgeladen
-- Tüten-Bild und Waschtag-Foto können optional ausgeschlossen werden (nur für Datenextraktion)
+- Tüten-Bild und Waschtag-Foto werden **immer ausgeschlossen** (nur zur Datenextraktion, nie in der Shopify-Listing)
 
 ### 3.3 Produkttitel
 Format: `[Marke] [Modell] [Fit] Jeans (W../L..)`  
