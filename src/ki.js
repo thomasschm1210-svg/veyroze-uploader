@@ -20,8 +20,6 @@ Extract ALL of the following and return ONLY valid JSON, no markdown, no explana
   "fit": "fit type, e.g. bootcut, slim, straight, relaxed",
   "size_w": 30,
   "size_l": 34,
-  "wash_details": "description of the denim wash, e.g. cool denim wash, dark indigo, light fade",
-  "condition": "top | very good | good | acceptable",
   "measurements": {
     "length_cm": 98,
     "waist_cm": 42,
@@ -161,13 +159,25 @@ function buildTitle(brand, model, fit, sizeW, sizeL) {
   return `${parts.join(' ')}${size}`;
 }
 
-function buildJeansDescription(brand, model, sizeW, sizeL, washDetails, condition, fit, measurements) {
+function formatCondition(val) {
+  const n = parseFloat(val);
+  if (isNaN(n)) return null;
+  return n >= 10 ? 'top' : `${n}/10`;
+}
+
+function conditionFromText(val) {
+  if (typeof val === 'number') return Math.round(Math.min(10, Math.max(0.5, val)) * 2) / 2;
+  const map = { 'top': 10, 'very good': 9, 'good': 8, 'acceptable': 6.5 };
+  return map[String(val).toLowerCase().trim()] ?? null;
+}
+
+function buildJeansDescription(brand, model, sizeW, sizeL, condition, fit, measurements) {
   const { length_cm, waist_cm, leg_opening_cm } = measurements || {};
   return [
     `${brand}${model ? ' ' + model : ''}   Size: W${sizeW}/L${sizeL} 🩻`,
     '',
-    `Details: ${washDetails || '—'} 🔍`,
-    `Condition: ${condition || '—'} 🧤`,
+    `Details: cool denim wash 🔍`,
+    `Condition: ${formatCondition(condition) || '—'} 🧤`,
     `Fit: ${fit || '—'}`,
     '',
     'Measurements 📏:',
@@ -347,7 +357,7 @@ export async function mockKiAnalyze(imageFiles, opts = {}) {
     size_w        = null,
     size_l        = null,
     wash_details  = null,
-    condition     = null,
+    condition: conditionRaw = null,
     measurements  = {},
     country_of_origin = null,
     sku           = null,
@@ -390,6 +400,8 @@ export async function mockKiAnalyze(imageFiles, opts = {}) {
         ? String(sku).trim().toUpperCase()
         : null);
 
+  const condition = 9;
+
   // Längenkorrektur: gemessene Länge < 100cm → L-Größe nach unten korrigieren
   const correctedL    = lengthLabel(size_l, measurements.length_cm);
   const labelSize     = size_w && size_l     ? `W${size_w}/L${size_l}` : null;
@@ -403,7 +415,7 @@ export async function mockKiAnalyze(imageFiles, opts = {}) {
   const taxTag      = isPlug ? 'PLUG' : 'diff';
 
   const tags = ['KI', taxTag];
-  if (labelSize) tags.push(labelSize);
+  if (size_w) tags.push(`W${size_w}`);
 
   const collections = ['Jeans'];
   if (size_w) collections.push(`W${size_w}`);
@@ -412,7 +424,7 @@ export async function mockKiAnalyze(imageFiles, opts = {}) {
 
   const normalizedFit   = fit?.toLowerCase() === 'bootcut' ? fit : (fit ? 'straight / regular' : null);
   const titel_vorschlag = buildTitle(brand, jeansModel, normalizedFit, size_w, correctedL ?? size_l);
-  const beschreibung    = buildJeansDescription(brand, jeansModel, size_w, correctedL ?? size_l, wash_details, condition, normalizedFit, measurements);
+  const beschreibung    = buildJeansDescription(brand, jeansModel, size_w, correctedL ?? size_l, condition, normalizedFit, measurements);
 
   const konfidenzMap = { high: 'hoch', medium: 'mittel', low: 'niedrig' };
 
