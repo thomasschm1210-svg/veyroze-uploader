@@ -174,16 +174,18 @@ function conditionFromText(val) {
 function buildJeansDescription(brand, model, sizeW, sizeL, condition, fit, measurements) {
   const { length_cm, waist_cm, leg_opening_cm } = measurements || {};
   return [
-    `${brand}${model ? ' ' + model : ''}   Size: W${sizeW}/L${sizeL} 🩻`,
+    `${brand}${model ? ' ' + model : ''}`,
     '',
-    `Details: cool denim wash 🔍`,
-    `Condition: ${formatCondition(condition) || '—'} 🧤`,
+    `Size: W${sizeW}/L${sizeL} 👖`,
+    '',
+    `Details: cool denim wash 🔎`,
+    `Condition: ${formatCondition(condition) || '—'} 🧼`,
     `Fit: ${fit || '—'}`,
     '',
-    'Measurements 📏:',
-    `Length: ${length_cm ?? '—'} cm`,
-    `Waist: ${waist_cm ?? '—'} cm`,
-    `Leg opening: ${leg_opening_cm ?? '—'} cm`,
+    'Measurements📏:',
+    `Length: ${length_cm ?? '—'}cm`,
+    `Waist: ${waist_cm ?? '—'}cm`,
+    `Leg opening: ${leg_opening_cm ?? '—'}cm`,
   ].join('\n');
 }
 
@@ -202,16 +204,16 @@ async function callGemini(imageParts) {
           model: modelName,
           generationConfig: { temperature: 0 },
         });
-        const result = await model.generateContent([PROMPT, ...imageParts]);
+        const result = await withTimeout(model.generateContent([PROMPT, ...imageParts]), GEMINI_TIMEOUT_MS);
         return result.response.text().trim();
       } catch (err) {
-        const status = err.status;
-        if (status === 404) break;                        // model doesn't exist → next model
+        const status = err?.status;
+        if (err.isTimeout || status === 404) break;
         if (RETRYABLE.has(status) && attempt < MAX_ATTEMPTS) {
           await new Promise(r => setTimeout(r, attempt * 300));
           continue;
         }
-        if (RETRYABLE.has(status)) break;                // exhausted retries → next model
+        if (RETRYABLE.has(status)) break;
         throw err;
       }
     }
@@ -238,13 +240,21 @@ Rules:
 
 const SEP_CHUNK_SIZE        = 12;
 const SEP_CHUNK_CONCURRENCY = 5;
+const GEMINI_TIMEOUT_MS     = 15_000;
+
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error('timeout'), { isTimeout: true })), ms)),
+  ]);
+}
 
 async function detectSeparatorsChunk(parts) {
   for (const modelName of SEP_MODELS) {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
         const model  = genAI.getGenerativeModel({ model: modelName });
-        const result = await model.generateContent([SEP_BATCH_PROMPT, ...parts]);
+        const result = await withTimeout(model.generateContent([SEP_BATCH_PROMPT, ...parts]), GEMINI_TIMEOUT_MS);
         const text   = result.response.text().trim();
         const match  = text.match(/\[[\s\S]*\]/);
         if (!match) return null;
@@ -261,7 +271,7 @@ async function detectSeparatorsChunk(parts) {
         });
       } catch (err) {
         const status = err?.status;
-        if (status === 404) break;
+        if (err.isTimeout || status === 404) break;
         if (RETRYABLE.has(status) && attempt < MAX_ATTEMPTS) {
           await new Promise(r => setTimeout(r, attempt * 300));
           continue;
@@ -422,7 +432,7 @@ export async function mockKiAnalyze(imageFiles, opts = {}) {
 
   const weight = size_w ? shippingWeight(size_w) : 0.8;
 
-  const normalizedFit   = fit?.toLowerCase() === 'bootcut' ? fit : (fit ? 'straight / regular' : null);
+  const normalizedFit   = fit?.toLowerCase() === 'bootcut' ? 'bootcut' : 'straight / regular';
   const titel_vorschlag = buildTitle(brand, jeansModel, normalizedFit, size_w, correctedL ?? size_l);
   const beschreibung    = buildJeansDescription(brand, jeansModel, size_w, correctedL ?? size_l, condition, normalizedFit, measurements);
 
