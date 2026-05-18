@@ -1024,9 +1024,6 @@
         <button class="btn btn-success btn-block" id="btnShopifyAll" onclick="shopifyAll()">
           Push all to Shopify
         </button>
-        <a class="btn btn-secondary btn-block" id="btnCsv" style="margin-top:10px;display:none;text-align:center;text-decoration:none" download>
-          Download CSV
-        </a>
         <button class="btn btn-secondary btn-block" style="margin-top:10px" onclick="resetAll()">
           Start a new run
         </button>
@@ -1156,7 +1153,7 @@
         </div>
         <div class="modal-field full">
           <label>Description</label>
-          <textarea id="m-desc" placeholder="Levi's 512   Size: W30/L34 🩻&#10;&#10;Details: …&#10;Condition: …&#10;Fit: …&#10;&#10;Measurements 📏:&#10;Length: — cm"></textarea>
+          <textarea id="m-desc" placeholder="Levi's 512&#10;&#10;Size: W30/L34 👖&#10;&#10;Details: cool denim wash 🔎&#10;Condition: top 🧼&#10;Fit: …&#10;&#10;Measurements📏:&#10;Length: —cm"></textarea>
         </div>
       </div>
     </div>
@@ -1256,7 +1253,7 @@ async function saveProductsState() {
   try {
     const db = await getDB();
     const tx = db.transaction('state', 'readwrite');
-    tx.objectStore('state').put({ key: 'products', data: allProducts, csvUrl: _csvUrl, runId });
+    tx.objectStore('state').put({ key: 'products', data: allProducts, runId });
     await new Promise((r, j) => { tx.oncomplete = r; tx.onerror = j; });
   } catch(e) { console.error('saveProductsState:', e); }
 }
@@ -1289,7 +1286,7 @@ async function restoreState() {
       if (prec?.data?.length) {
         _restoring = false;
         if (prec.runId) runId = prec.runId;
-        showProducts({ products: prec.data, stats: {}, csvUrl: prec.csvUrl });
+        showProducts({ products: prec.data, stats: {} });
         return;
       }
     } catch(e) { console.error('restoreProducts:', e); }
@@ -1567,6 +1564,7 @@ async function startUpload() {
   const allFiles = groups.flat();
   if (!allFiles.length) return;
 
+  allProducts = [];
   runId = `run_${Date.now()}`;
   showScreen('screen-progress');
   document.getElementById('overallLabel').textContent = 'Vorverarbeitung';
@@ -1645,7 +1643,6 @@ function startSSE() {
     if (document.getElementById('screen-progress').classList.contains('active')) {
       currentFilter = 'all';
       showScreen('screen-products');
-      document.getElementById('btnCsv').style.display = 'none';
       document.getElementById('productList').innerHTML = '';
       renderSummary();
     }
@@ -1661,10 +1658,6 @@ function startSSE() {
     setOverall(100);
     es.close();
     _stats  = d.stats  || {};
-    _csvUrl = d.csvUrl || null;
-    const btnCsv = document.getElementById('btnCsv');
-    if (_csvUrl) { btnCsv.href = _csvUrl; btnCsv.style.display = ''; }
-    else btnCsv.style.display = 'none';
     renderSummary();
     showScreen('screen-products');
     saveProductsState();
@@ -1728,19 +1721,11 @@ function setOverall(pct) {
 // ── Products screen ──────────────────────────────────────────────────────────
 let currentFilter = 'all';
 let _stats = {};
-let _csvUrl = null;
-
-function showProducts({ products, stats, csvUrl }) {
+function showProducts({ products, stats }) {
   allProducts = products || [];
   _stats = stats || {};
-  _csvUrl = csvUrl || null;
   currentFilter = 'all';
   showScreen('screen-products');
-
-  const btnCsv = document.getElementById('btnCsv');
-  if (_csvUrl) { btnCsv.href = _csvUrl; btnCsv.style.display = ''; }
-  else btnCsv.style.display = 'none';
-
   renderSummary();
   renderFilteredList();
   saveProductsState();
@@ -1892,7 +1877,7 @@ function syncConditionToDescription() {
   if (!desc) return;
   const raw     = document.getElementById('m-condition').value;
   const display = raw ? formatCondition(raw) : '—';
-  desc.value    = desc.value.replace(/^(Condition:\s*).*$/m, `$1${display} 🧤`);
+  desc.value    = desc.value.replace(/^(Condition:\s*).*$/m, `$1${display} 🧼`);
 }
 
 const MEAS_DESC_LABELS = {
@@ -1958,7 +1943,7 @@ function openProductModal(idx) {
   const cleanTags = rawTags.map(t => t.replace(/^(W\d+)\/L\d+$/i, '$1'));
   document.getElementById('m-tags').value       = cleanTags.join(', ');
   const rawDesc = ki.beschreibung || '';
-  document.getElementById('m-desc').value = rawDesc.replace(/^(Details:\s*).*$/m, '$1cool denim wash 🔍');
+  document.getElementById('m-desc').value = rawDesc.replace(/^(Details:\s*).*$/m, '$1cool denim wash 🔎');
   syncConditionToDescription();
 
   // Confidence warning
@@ -2084,17 +2069,21 @@ async function shopifySingle(idx) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         product: {
-          titel_vorschlag: ki.titel_vorschlag,
-          beschreibung:    ki.beschreibung,
-          marke:           ki.marke,
-          modell:          ki.modell,
-          size_corrected:  ki.size_corrected || ki.groesse,
-          condition:       ki.condition || ki.zustand,
-          taxable:         ki.taxable ?? false,
-          tags:            ki.tags,
-          sku:             ki.sku || null,
-          suggested_price: ki.preis_eur || 0,
-          images:          p.images || [],
+          titel_vorschlag:    ki.titel_vorschlag,
+          beschreibung:       ki.beschreibung,
+          marke:              ki.marke,
+          modell:             ki.modell,
+          size_corrected:     ki.size_corrected || ki.groesse,
+          condition:          ki.condition || ki.zustand,
+          taxable:            ki.taxable ?? false,
+          tags:               ki.tags,
+          sku:                ki.sku || null,
+          suggested_price:    ki.preis_eur || 0,
+          collections:        ki.collections || [],
+          shipping_weight_kg: ki.shipping_weight_kg ?? 0.8,
+          country_of_origin:  ki.country_of_origin || 'Pakistan',
+          hs_code:            ki.hs_code || '6309000',
+          images:             p.images || [],
         }
       })
     });
@@ -2118,7 +2107,12 @@ async function shopifySingle(idx) {
         oldCard.remove();
       }
     }
-    showToast(`"${data.title}" → Shopify Draft erstellt ✓`);
+    if (data.warnings && data.warnings.length) {
+      console.warn('Shopify-Warnungen:', data.warnings);
+      showToast(`"${data.title}" → Draft ✓ (${data.warnings.length} Warnung(en) – siehe Konsole)`);
+    } else {
+      showToast(`"${data.title}" → Shopify Draft erstellt ✓`);
+    }
   } catch (err) {
     showToast(`Fehler: ${err.message}`);
     if (btn) { btn.disabled = false; btn.textContent = 'Push to Shopify'; }
@@ -2128,7 +2122,7 @@ async function shopifySingle(idx) {
 function shopifyAll() {
   const pending = allProducts.map((p, idx) => ({ p, idx })).filter(({ p }) => !p._shopifyDone);
   if (!pending.length) { showToast('All products already pushed'); return; }
-  pending.forEach(({ idx }, i) => setTimeout(() => shopifySingle(idx), i * 600));
+  pending.forEach(({ idx }, i) => setTimeout(() => shopifySingle(idx), i * 200));
 }
 
 // ── Guard against accidental page refresh ─────────────────────────────────────

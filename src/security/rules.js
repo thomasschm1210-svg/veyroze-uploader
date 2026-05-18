@@ -1,13 +1,13 @@
 export const RULES = {
   upload: {
-    maxFileSizeMb:    15,
+    maxFileSizeMb:    10,
     allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'],
-    maxImagesPerRun:  500,
+    maxImagesPerRun:  200,
   },
   rateLimit: {
     windowMs:              60_000,
-    maxRequestsPerWindow:  300,
-    maxKiCallsPerDay:      2000,
+    maxRequestsPerWindow:  60,
+    maxKiCallsPerDay:      500,
   },
   promptInjection: {
     forbiddenPatterns: [

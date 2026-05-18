@@ -205,7 +205,7 @@ app.post('/api/shopify/:runId/:productIdx', express.json(), async (req, res) => 
 
   try {
     const result = await createShopifyDraft(product, imageFiles, shop, token);
-    res.json({ ok: true, shopifyId: result.id, title: result.title, url: result.url });
+    res.json({ ok: true, shopifyId: result.id, title: result.title, url: result.url, warnings: result.warnings || [] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
