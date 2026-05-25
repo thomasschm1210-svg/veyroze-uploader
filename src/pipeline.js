@@ -3,7 +3,7 @@ import path from 'path';
 import { log }                  from './logger.js';
 import { Progress }             from './progress.js';
 import { securityCheck }        from './security/index.js';
-import { checkDuplicate }       from './deduplicator.js';
+import { checkDuplicate, fileHashAsync, flushRegistry } from './deduplicator.js';
 import { compressGroup }        from './compressor.js';
 import { mockKiAnalyze }        from './ki.js';
 import { exportToCSV }          from './csvExport.js';
@@ -45,7 +45,7 @@ export async function runPipeline(allImages, baseDir, opts = {}) {
   progSep.setPhase('Trennbilder');
 
   let lastDone = 0;
-  const detected = await groupImagesBySeparator(flat, (done, total, name) => {
+  const { groups: detected, items: sepItems } = await groupImagesBySeparator(flat, (done, total, name) => {
     const delta = done - lastDone;
     lastDone = done;
     if (delta <= 0) return;
@@ -54,7 +54,31 @@ export async function runPipeline(allImages, baseDir, opts = {}) {
     }
   });
   progSep.done();
+  logger.separators(sepItems, detected);
   log.success(`${detected.length} Produkt(e) erkannt`);
+
+  // Sanity-Warnungen für die Konsole — alle Details stehen im Audit-Block im Log
+  const totalChunks  = new Set(sepItems.map(it => it.chunkIndex).filter(i => i != null)).size;
+  const failedChunks = new Set(sepItems.filter(it => it.chunkFailed).map(it => it.chunkIndex));
+  if (failedChunks.size > 0) {
+    log.warn(`Trennbild-Erkennung: ${failedChunks.size} Chunk(s) fehlgeschlagen — siehe Log`);
+  }
+  // Wenn JEDER Chunk gefailed ist und die Ursache ein Quota-Hinweis (429) war → früh abbrechen.
+  if (totalChunks > 0 && failedChunks.size === totalChunks) {
+    const reasons = sepItems.map(it => it.failReason || '').join(' | ');
+    if (/429|Too Many Requests|quota|Tageslimit/i.test(reasons)) {
+      throw new Error('Gemini-API Tageslimit erreicht (Free-Tier: 20 Requests/Tag pro Modell). Bitte später erneut versuchen oder Billing in Google AI Studio aktivieren.');
+    }
+  }
+  const suspicious = detected.filter(g => {
+    const tCount = g.productImages.filter(p =>
+      sepItems.find(it => it.path === p)?.isSeparator
+    ).length;
+    return tCount !== 1 || String(g.sku).startsWith('UNKNOWN_');
+  });
+  if (suspicious.length > 0) {
+    log.warn(`Trennbild-Erkennung: ${suspicious.length} verdächtige Gruppe(n) — siehe Log`);
+  }
 
   const groups = detected.map(g => g.productImages).filter(g => g.length > 0);
   const skuByGroupIndex = detected.filter(g => g.productImages.length > 0).map(g => g.sku);
@@ -66,17 +90,22 @@ export async function runPipeline(allImages, baseDir, opts = {}) {
   }
 
   // ── Phase 2: Duplikate herausfiltern ────────────────────────────────────────
-  const dupTotal = groups.flat().length;
+  const flatForDedup = groups.flat();
+  const dupTotal = flatForDedup.length;
   log.header(`PHASE 2 / 4  Duplikate prüfen (${dupTotal} Bilder)`);
   const prog1 = new ProgressClass(dupTotal, 'Duplikate');
   prog1.setPhase('Duplikate');
   const cleanGroups = [];
   const cleanSkus   = [];
 
+  // Hashes parallel berechnen — sync I/O würde den Event-Loop pro Datei blockieren.
+  const hashList = await Promise.all(flatForDedup.map(f => fileHashAsync(f).catch(() => null)));
+  const hashByFile = new Map(flatForDedup.map((f, i) => [f, hashList[i]]));
+
   for (let gi = 0; gi < groups.length; gi++) {
     const clean = [];
     for (const f of groups[gi]) {
-      const { isDuplicate, originalPath } = checkDuplicate(f);
+      const { isDuplicate, originalPath } = checkDuplicate(f, hashByFile.get(f));
       if (isDuplicate) {
         router.moveToDuplicate(f, originalPath);
         logger.duplicate(f, originalPath);
@@ -91,6 +120,7 @@ export async function runPipeline(allImages, baseDir, opts = {}) {
       cleanSkus.push(skuByGroupIndex[gi]);
     }
   }
+  flushRegistry();
   prog1.done();
 
   // ── Phase 3 + 4: Komprimieren → KI (Fließband, alle Produkte parallel) ──────
@@ -135,7 +165,7 @@ export async function runPipeline(allImages, baseDir, opts = {}) {
           logger.errorItem(f, err.message);
         }
         prog3.tick(`[FEHLER] ${groupLabel}`);
-        return null;
+        return { __failed: true, error: err };
       }
       const ki = kiRes.value;
 
@@ -176,7 +206,18 @@ export async function runPipeline(allImages, baseDir, opts = {}) {
     }
   );
 
-  const products = (await withConcurrency(taskFns, KI_CONCURRENCY)).filter(Boolean);
+  const allResults = await withConcurrency(taskFns, KI_CONCURRENCY);
+  const failures   = allResults.filter(r => r && r.__failed);
+  const products   = allResults.filter(r => r && !r.__failed);
+
+  // Wenn ALLE Gruppen mit Quota-Fehler gescheitert sind, brechen wir mit klarer Message ab.
+  // Sonst sieht der User nur "0 Produkte erkannt" und denkt es sei ein Bug.
+  if (products.length === 0 && failures.length > 0) {
+    const quotaFails = failures.filter(f => f.error?.isQuotaError || /Tageslimit|quota|429/i.test(f.error?.message || ''));
+    if (quotaFails.length === failures.length) {
+      throw new Error('Gemini-API Tageslimit erreicht (Free-Tier: 20 Requests/Tag pro Modell). Bitte später erneut versuchen oder Billing in Google AI Studio aktivieren.');
+    }
+  }
   prog2.done();
   prog3.done();
   logger.stats.savedMB = totalSavedMB.toFixed(1);
