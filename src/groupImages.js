@@ -18,7 +18,7 @@ export async function groupImages(inputFolder) {
 }
 
 export async function groupImagesBySeparator(imagePaths, progressCallback) {
-  if (!imagePaths.length) return [];
+  if (!imagePaths.length) return { groups: [], items: [] };
 
   // Die Upload-Reihenfolge ist die Wahrheit: der Kunde legt die Tüte bewusst
   // als erstes Foto pro Produkt rein. EXIF-Timestamps sind unzuverlässig
@@ -35,7 +35,7 @@ export async function groupImagesBySeparator(imagePaths, progressCallback) {
       sequence.length,
       `Batch ${chunksDone}/${totalChunks} (${processed}/${sequence.length} Bilder)`,
     );
-  })) || sequence.map(() => ({ isSeparator: false, sku: null }));
+  })) || sequence.map(() => ({ isSeparator: false, sku: null, chunkFailed: true, failReason: 'no-genai' }));
 
   const trennerCount = results.filter(r => r.isSeparator).length;
   progressCallback?.(sequence.length, sequence.length, `${trennerCount} Trennbild(er) gefunden`);
@@ -45,8 +45,11 @@ export async function groupImagesBySeparator(imagePaths, progressCallback) {
   let unknown  = 0;
   const newUnknownSku = () => `UNKNOWN_${String(++unknown).padStart(3, '0')}`;
 
+  const items = [];
+
   for (let i = 0; i < sequence.length; i++) {
     const r = results[i];
+    let assignedGroupIndex;
     if (r.isSeparator) {
       // Tüten-Foto bleibt im Produkt — KI braucht es, um die SKU zu verifizieren
       current = {
@@ -56,6 +59,7 @@ export async function groupImagesBySeparator(imagePaths, progressCallback) {
         groupIndex: groups.length,
       };
       groups.push(current);
+      assignedGroupIndex = current.groupIndex;
     } else {
       if (!current) {
         current = {
@@ -67,8 +71,24 @@ export async function groupImagesBySeparator(imagePaths, progressCallback) {
         groups.push(current);
       }
       current.productImages.push(sequence[i]);
+      assignedGroupIndex = current.groupIndex;
     }
+    items.push({
+      path:           sequence[i],
+      isSeparator:    !!r.isSeparator,
+      sku:            r.sku || null,
+      rejectedSku:    r.rejectedSku || null,
+      chunkIndex:     r.chunkIndex ?? null,
+      chunkFailed:    !!r.chunkFailed,
+      failReason:     r.failReason || null,
+      modelUsed:      r.modelUsed || null,
+      verified:       r.verified ?? null,
+      verifyMismatch: r.verifyMismatch || null,
+      verifyModel:    r.verifyModel || null,
+      skuCollision:   !!r.skuCollision,
+      groupIndex:     assignedGroupIndex,
+    });
   }
 
-  return groups;
+  return { groups, items };
 }

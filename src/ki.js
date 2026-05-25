@@ -36,6 +36,13 @@ Extract ALL of the following and return ONLY valid JSON, no markdown, no explana
 SKU identification rules — follow exactly:
 - The SKU appears on a semi-transparent or white PLASTIC BAG (Tüte) — the bag itself is often only partially visible (corner or edge of the bag in the frame).
 - The number is handwritten directly on the bag surface in pencil or marker. It is ALWAYS exactly 5 digits (e.g. 48010, 37204, 48009).
+- The SKU is PURELY NUMERIC — only digits 0–9. It NEVER contains any letter.
+- Handwritten digits can be misread as letters. Common pitfalls:
+    "4" with open top → looks like "LI", "H", "U" → it is a 4.
+    "1" → looks like "I" or "l" → it is a 1.
+    "7" → looks like "T" → it is a 7.
+    "0" → looks like "O" or "D" → it is a 0.
+  If your reading contains any letter, you are misreading a digit. Convert it to the correct digit before returning.
 - Count every digit individually before returning. If the result is not exactly 5 digits, re-examine. If still not exactly 5, return null — do not guess or pad.
 - CRITICAL — these are NOT the SKU: numbers printed on wash care tags, numbers on size labels, numbers on brand patches, barcodes, article numbers on sewn-in tags, or any printed text on the garment itself.
 - The wash care tag is a paper or fabric tag sewn into the jeans — any number there is NOT the SKU.
@@ -45,20 +52,21 @@ SKU identification rules — follow exactly:
 
 Self-check before returning JSON:
 1. Count the digits in your sku value. Is it exactly 5? If not, set sku to null.
-2. Is the source a handwritten number on a plastic bag? If not, set sku to null.
+2. Does your sku contain any letter (A–Z)? If yes, you misread a digit — fix it. If you can't, set sku to null.
+3. Is the source a handwritten number on a plastic bag? If not, set sku to null.
 
 Rules:
 - Read size_w and size_l as integers from the label (e.g. W30/L34 → size_w: 30, size_l: 34)
 - If a value is truly not determinable, use null
 - confidence reflects overall certainty across all extracted fields
-- utility_image_indices: 0-based indices of images that should NOT appear in the Shopify listing — only filter out: (1) photos where a ruler or tape measure is placed next to the jeans, (2) photos showing only a SKU bag or sticker. Do NOT filter out label/badge photos (e.g. the brand patch on the jeans) — those are valid product photos. Use [] if no images need filtering.
+- utility_image_indices: 0-based indices of images that should NOT appear in the Shopify listing — filter out ALL of: (1) photos where a ruler or tape measure is placed next to the jeans, (2) photos showing only a SKU bag or sticker, (3) photos showing only a wash care tag / laundry label (the sewn-in tag with washing symbols and country of origin — NOT a brand patch or model name badge). Do NOT filter out brand patches, model badges, or inner waistband labels — those are valid product photos. Use [] if no images need filtering.
 - measurement_image_indices: 0-based indices of ALL photos that show a ruler or measuring tape next to the jeans (these are the measurement photos). Include every image where a Zollstock is visible. Use [] if none.
 - product_image_order: 0-based indices of product photos in this EXACT order for the Shopify listing (matches veyroze.com store pattern):
-  position 0 → front view (jeans laid flat, front side facing up)
-  position 1 → back view (jeans laid flat, back side facing up)
-  position 2 → inner badge/tag (the sewn-in label inside the waistband showing model name and fit type, e.g. "512 BOOTCUT") — include only if clearly visible in a photo
-  position 3 → outer badge/patch (the leather or woven patch sewn on the outside back waistband showing brand name and W/L size) — include only if clearly visible in a photo
-  position 4+ → detail shots of flaws or visible wear (stains, holes, heavy fading, damage) — only include if such defects are documented in a photo
+  position 0 → front view (jeans laid flat, front side facing up — the whole pair of jeans visible)
+  position 1 → back view (jeans laid flat, back side facing up — the whole pair of jeans visible, brand patches usually visible)
+  position 2 → outer brand patch (close-up of the leather or woven patch sewn on the OUTSIDE back waistband, showing brand name and W/L size, e.g. "Levi Strauss & Co W33 L32" or a Wrangler leather patch) — include only if clearly visible in a photo
+  position 3 → inner brand badge (close-up of the sewn-in fabric label at the top of the waistband, showing model name and fit type, e.g. "512 BOOTCUT" or "LOW BOOT CUT 527") — include only if clearly visible in a photo
+  position 4+ → detail shots of visible defects (rips, holes, heavy fading, stains) — only include if such defects are documented in a photo
   EXCLUDE from this array: SKU bag photos, ruler/measuring tape photos, wash care tag/laundry label photos.
   Use [] if no suitable product photos exist.
 
@@ -147,7 +155,7 @@ function shippingWeight(sizeW) {
 }
 
 function lengthLabel(sizeL, lengthCm) {
-  if (!lengthCm || lengthCm >= 100) return sizeL;
+  if (!sizeL || !lengthCm || lengthCm >= 100) return sizeL;
   // L sizes are ~5cm apart; <100cm means the jeans are one L-size shorter than labeled
   return sizeL - 2;
 }
@@ -190,57 +198,137 @@ function buildJeansDescription(brand, model, sizeW, sizeL, condition, fit, measu
 }
 
 const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest'];
-// Separator-Erkennung ist eine simple Binärklassifikation + Lesen einer kurzen Ziffernfolge —
-// flash-lite ist hier 3–5× schneller als flash und genauso treffsicher.
+// Separator-Erkennung: flash-lite zuerst — 3–5× schneller und höheres Rate-Limit.
+// Halluzinationen werden durch den geschärften Batch-Prompt + Single-Image-Re-Verifikation
+// in detectSeparatorsBatch abgefangen, sodass flash nicht im Hot-Path nötig ist.
 const SEP_MODELS = ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest'];
 const RETRYABLE = new Set([429, 503]);
-const MAX_ATTEMPTS = 3;
 
-async function callGemini(imageParts) {
-  for (const modelName of MODELS) {
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      try {
-        const model  = genAI.getGenerativeModel({
-          model: modelName,
-          generationConfig: { temperature: 0 },
-        });
-        const result = await withTimeout(model.generateContent([PROMPT, ...imageParts]), GEMINI_TIMEOUT_MS);
-        return result.response.text().trim();
-      } catch (err) {
-        const status = err?.status;
-        if (err.isTimeout || status === 404) break;
-        if (RETRYABLE.has(status) && attempt < MAX_ATTEMPTS) {
-          await new Promise(r => setTimeout(r, attempt * 300));
-          continue;
-        }
-        if (RETRYABLE.has(status)) break;
-        throw err;
-      }
-    }
-  }
-  throw new Error('Alle Gemini-Modelle nicht erreichbar. Bitte später erneut versuchen.');
+// Globale Modell-Blacklist: ein Modell, das in den letzten 30s mit 503/500/Timeout
+// gefallen ist, wird von allen parallelen Workern übersprungen. Spart bei großen
+// Uploads zweistellig Sekunden, weil nicht jeder Chunk denselben kaputten Modellpfad
+// neu durchprobieren muss.
+const modelBlacklist = new Map(); // modelName → expiresAt (ms)
+const MODEL_BLACKLIST_TTL_MS = 30_000;
+
+function isModelBlacklisted(name) {
+  const exp = modelBlacklist.get(name);
+  if (!exp) return false;
+  if (Date.now() > exp) { modelBlacklist.delete(name); return false; }
+  return true;
+}
+function blacklistModel(name) {
+  modelBlacklist.set(name, Date.now() + MODEL_BLACKLIST_TTL_MS);
+}
+function clearModelBlacklist(name) {
+  modelBlacklist.delete(name);
 }
 
-const SEP_BATCH_PROMPT = `You receive multiple images in order. For EACH image, determine if it is a SEPARATOR PHOTO.
+// Aufruf eines Gemini-Modells mit schnellem Fallback.
+// - 503/500/502/Timeout/Unknown → sofort nächstes Modell (Blacklist 30s)
+// - 429 → kurzer Retry-Versuch nach 3500ms (Gemini empfiehlt ~3s), dann nächstes Modell
+// - 404 (Modell unbekannt) → sofort nächstes Modell
+async function callGeminiModel(modelName, contents, opts = {}) {
+  const model = genAI.getGenerativeModel({
+    model: modelName,
+    ...(opts.config ? { generationConfig: opts.config } : {}),
+  });
+  try {
+    const result = await withTimeout(model.generateContent(contents), GEMINI_TIMEOUT_MS);
+    clearModelBlacklist(modelName);
+    return { ok: true, text: result.response.text().trim() };
+  } catch (err) {
+    const status = err?.status;
+    if (status === 429) {
+      // 429 ist im Free-Tier oft ein hartes Tages-Limit, nicht throttling.
+      // Ein kurzer Retry lohnt sich nur bei kurzfristigem Throttling — beim Hard-Quota
+      // bringt es nichts. Wir warten 3.5s (Gemini's Empfehlung) und versuchen 1×.
+      await new Promise(r => setTimeout(r, 3500));
+      try {
+        const result = await withTimeout(model.generateContent(contents), GEMINI_TIMEOUT_MS);
+        clearModelBlacklist(modelName);
+        return { ok: true, text: result.response.text().trim() };
+      } catch (err2) {
+        blacklistModel(modelName);
+        return { ok: false, status: err2?.status, error: err2, isTimeout: err2?.isTimeout, isQuota: err2?.status === 429 };
+      }
+    }
+    blacklistModel(modelName);
+    return { ok: false, status, error: err, isTimeout: err?.isTimeout };
+  }
+}
+
+async function callGemini(imageParts) {
+  let lastError = null;
+  let allQuota  = true;
+  let attempted = 0;
+  for (const modelName of MODELS) {
+    if (isModelBlacklisted(modelName)) continue;
+    attempted++;
+    const res = await callGeminiModel(modelName, [PROMPT, ...imageParts], { config: { temperature: 0 } });
+    if (res.ok) return res.text;
+    if (res.status !== 429) allQuota = false;
+    lastError = res.error;
+  }
+  if (attempted > 0 && allQuota) {
+    const err = new Error('Gemini-API Tageslimit erreicht (Free-Tier). Bitte später erneut versuchen oder Billing aktivieren.');
+    err.isQuotaError = true;
+    throw err;
+  }
+  throw lastError || new Error('Alle Gemini-Modelle nicht erreichbar. Bitte später erneut versuchen.');
+}
+
+const SEP_BATCH_PROMPT = `You receive multiple images. Each image is INDEPENDENT. Treat every image on its own — do NOT infer codes from neighboring images or from any sequence pattern.
+
+For EACH image, determine if it is a SEPARATOR PHOTO.
 
 A separator photo shows a translucent/frosted plastic bag (Tüte/Polybeutel, often with a small hanging hole) OR a piece of paper/card, with a HANDWRITTEN inventory code on it (in black marker/Edding or pencil).
 
-The inventory code is short and alphanumeric — typically letters followed by digits (e.g. "LI8005", "BR4421"), or pure digits (e.g. "48005"). Length is typically 4–8 characters.
+The inventory code is ALWAYS PURELY NUMERIC — only digits 0–9, never any letters. Length is typically exactly 5 digits (e.g. "48005", "48008", "48010", "37204"). Length may range from 4 to 8 digits but is almost always 5.
 
-IMPORTANT: The photo may have been taken with the phone rotated or upside-down. The handwritten code may appear at any angle (90°, 180°, 270° rotated). Examine all orientations carefully — rotate the image mentally if needed to read the characters.
+CRITICAL — character reading: handwritten digits can be easy to misread as letters. Common pitfalls:
+- A handwritten "4" with an open top may look like "LI", "H", or "U" — it is still a 4.
+- A handwritten "1" may look like "I" or "l" — it is a 1.
+- A handwritten "7" may look like "T" — it is a 7.
+- A handwritten "0" may look like "O" or "D" — it is a 0.
+If you "see" any letter in the code, you are misreading a digit — re-examine and convert it to the correct digit (0–9).
+
+The photo may have been taken with the phone rotated or upside-down. The handwritten code may appear at any angle (90°, 180°, 270° rotated). Examine all orientations carefully — rotate the image mentally if needed to read the characters.
 
 Return ONLY a JSON array (no markdown, no prose), one object per input image in original order:
-[{"i":0,"sku":"LI8005"},{"i":1,"sku":null},...]
+[{"i":0,"sku":"48005"},{"i":1,"sku":null},...]
 
-Rules:
-- "sku" must be the handwritten code uppercased and trimmed (no spaces), or null.
-- Numbers printed on garment care tags, brand patches, size labels, rulers/tape measures or any printed text are NOT separators — return null for those.
-- Only HANDWRITTEN codes on a plastic bag or paper count.
-- If you cannot confidently read the code, return null.`;
+STRICT RULES — read carefully, these are non-negotiable:
+- An image of JEANS, GARMENTS, FABRIC, BUTTONS, POCKETS, RULERS, MEASURING TAPES, BRAND PATCHES, CARE LABELS, SIZE TAGS, or any clothing detail is NEVER a separator. Return null even if neighboring images had separators.
+- DO NOT GUESS codes from sequence or context (e.g. if previous images were 48005, 48006, 48007 — do NOT invent 48008 for the next image). Each image must be classified purely on what is VISIBLE in that single image.
+- Only return a non-null sku if you can VISUALLY READ a handwritten numeric code in the image itself.
+- "sku" must contain ONLY digits 0–9, no letters, no spaces, no punctuation. If your reading contains any letter, you are misreading a digit — fix it before returning.
+- Printed text on tags/patches/rulers is NOT a separator code.
+- If in doubt, return null. False positives are worse than false negatives.`;
 
 const SEP_CHUNK_SIZE        = 12;
 const SEP_CHUNK_CONCURRENCY = 5;
 const GEMINI_TIMEOUT_MS     = 15_000;
+
+const SEP_SINGLE_PROMPT = `Look at this ONE image. Is it a separator photo?
+
+A separator photo shows a translucent plastic bag (Tüte/Polybeutel) OR a piece of paper/card, with a HANDWRITTEN PURELY NUMERIC inventory code on it (black marker or pencil). The code is ALWAYS only digits 0–9, never any letters. Typical codes are 5 digits like "48005", "48008", "37204". Length 4–8 digits, almost always 5. The code may be rotated 0/90/180/270°.
+
+CRITICAL — handwritten digits can be misread as letters:
+- "4" with open top may look like "LI", "H", "U" — it is a 4.
+- "1" may look like "I" or "l" — it is a 1.
+- "7" may look like "T" — it is a 7.
+- "0" may look like "O" or "D" — it is a 0.
+If your reading contains any letter, you are misreading a digit. Correct it before returning.
+
+Return ONLY a single JSON object (no markdown, no prose):
+{"sku":"48005"} or {"sku":null}
+
+STRICT:
+- Jeans, garments, rulers, brand patches, care labels, fabric details are NEVER separators → return {"sku":null}.
+- Only return a non-null sku if you can VISUALLY READ a handwritten numeric code in THIS image.
+- "sku" must contain ONLY digits 0–9, no letters, no spaces.
+- If unsure, return {"sku":null}.`;
 
 function withTimeout(promise, ms) {
   return Promise.race([
@@ -250,38 +338,62 @@ function withTimeout(promise, ms) {
 }
 
 async function detectSeparatorsChunk(parts) {
+  let lastFail = { failReason: 'all-models-exhausted', modelUsed: null };
   for (const modelName of SEP_MODELS) {
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      try {
-        const model  = genAI.getGenerativeModel({ model: modelName });
-        const result = await withTimeout(model.generateContent([SEP_BATCH_PROMPT, ...parts]), GEMINI_TIMEOUT_MS);
-        const text   = result.response.text().trim();
-        const match  = text.match(/\[[\s\S]*\]/);
-        if (!match) return null;
-        const arr = JSON.parse(match[0]);
-        return parts.map((_, i) => {
-          const item = arr.find(a => a && a.i === i);
-          const sku  = item?.sku;
-          if (sku != null) {
-            const cleaned = String(sku).trim().toUpperCase().replace(/\s+/g, '');
-            if (/^[A-Z]{0,4}\d{3,8}$/.test(cleaned))
-              return { isSeparator: true, sku: cleaned };
-          }
-          return { isSeparator: false, sku: null };
-        });
-      } catch (err) {
-        const status = err?.status;
-        if (err.isTimeout || status === 404) break;
-        if (RETRYABLE.has(status) && attempt < MAX_ATTEMPTS) {
-          await new Promise(r => setTimeout(r, attempt * 300));
-          continue;
-        }
-        if (RETRYABLE.has(status)) break;
-        return null;
-      }
+    if (isModelBlacklisted(modelName)) continue;
+    const res = await callGeminiModel(modelName, [SEP_BATCH_PROMPT, ...parts]);
+    if (!res.ok) {
+      lastFail = { items: null, modelUsed: modelName, failReason: res.isTimeout ? 'timeout' : (res.error?.message || `status-${res.status || 'unknown'}`) };
+      continue;
     }
+    const match = res.text.match(/\[[\s\S]*\]/);
+    if (!match) return { items: null, modelUsed: modelName, failReason: 'no-json' };
+    let arr;
+    try { arr = JSON.parse(match[0]); }
+    catch { return { items: null, modelUsed: modelName, failReason: 'json-parse' }; }
+    const items = parts.map((_, i) => {
+      const item = arr.find(a => a && a.i === i);
+      const sku  = item?.sku;
+      if (sku != null) {
+        const cleaned = String(sku).trim().replace(/\s+/g, '');
+        if (/^\d{4,8}$/.test(cleaned))
+          return { isSeparator: true, sku: cleaned };
+        return { isSeparator: false, sku: null, rejectedSku: cleaned };
+      }
+      return { isSeparator: false, sku: null };
+    });
+    return { items, modelUsed: modelName, failReason: null };
   }
-  return null;
+  return lastFail;
+}
+
+async function verifySeparatorSingle(imagePath, cachedPart) {
+  if (!genAI) return { sku: null, modelUsed: null };
+  let part = cachedPart;
+  if (!part) {
+    try { part = await toPreprocessedInlinePart(imagePath); }
+    catch { return { sku: null, modelUsed: null, failReason: 'preprocess' }; }
+  }
+  let lastFailReason = 'all-models-exhausted';
+  for (const modelName of SEP_MODELS) {
+    if (isModelBlacklisted(modelName)) continue;
+    const res = await callGeminiModel(modelName, [SEP_SINGLE_PROMPT, part]);
+    if (!res.ok) {
+      lastFailReason = res.isTimeout ? 'timeout' : (res.error?.message || `status-${res.status || 'unknown'}`);
+      continue;
+    }
+    const match = res.text.match(/\{[\s\S]*\}/);
+    if (!match) return { sku: null, modelUsed: modelName };
+    let obj;
+    try { obj = JSON.parse(match[0]); }
+    catch { return { sku: null, modelUsed: modelName }; }
+    const sku = obj?.sku;
+    if (sku == null) return { sku: null, modelUsed: modelName };
+    const cleaned = String(sku).trim().replace(/\s+/g, '');
+    if (/^\d{4,8}$/.test(cleaned)) return { sku: cleaned, modelUsed: modelName };
+    return { sku: null, modelUsed: modelName };
+  }
+  return { sku: null, modelUsed: null, failReason: lastFailReason };
 }
 
 export async function detectSeparatorsBatch(imagePaths, onChunkDone) {
@@ -293,18 +405,34 @@ export async function detectSeparatorsBatch(imagePaths, onChunkDone) {
   }
 
   const results = new Array(imagePaths.length);
+  const partsCache = new Array(imagePaths.length);
   let nextChunk = 0;
   let chunksDone = 0;
 
   async function worker() {
     while (nextChunk < chunks.length) {
+      const chunkIndex = nextChunk;
       const { start, paths } = chunks[nextChunk++];
       let parts;
+      let preprocessError = null;
       try { parts = await Promise.all(paths.map(toPreprocessedInlinePart)); }
-      catch { parts = null; }
-      const chunkResult = parts ? await detectSeparatorsChunk(parts) : null;
+      catch (err) { parts = null; preprocessError = err?.message || 'preprocess-failed'; }
+      if (parts) {
+        for (let k = 0; k < parts.length; k++) partsCache[start + k] = parts[k];
+      }
+      const chunkResp = parts
+        ? await detectSeparatorsChunk(parts)
+        : { items: null, modelUsed: null, failReason: preprocessError };
+      const chunkFailed = !chunkResp || !chunkResp.items;
       for (let k = 0; k < paths.length; k++) {
-        results[start + k] = chunkResult?.[k] ?? { isSeparator: false, sku: null };
+        const item = chunkResp?.items?.[k] ?? { isSeparator: false, sku: null };
+        results[start + k] = {
+          ...item,
+          chunkIndex,
+          chunkFailed,
+          modelUsed:  chunkResp?.modelUsed ?? null,
+          failReason: chunkFailed ? (chunkResp?.failReason || 'unknown') : null,
+        };
       }
       chunksDone++;
       onChunkDone?.(chunksDone, chunks.length, paths.length);
@@ -315,6 +443,98 @@ export async function detectSeparatorsBatch(imagePaths, onChunkDone) {
     { length: Math.min(SEP_CHUNK_CONCURRENCY, chunks.length) },
     worker,
   ));
+
+  // Re-Verifikation: jeden Treffer einzeln prüfen, ohne Sequenz-Kontext.
+  // So fallen Halluzinationen weg (Jeans → "48009"), die nur durch den Batch entstanden.
+  const hitIndices = [];
+  for (let i = 0; i < results.length; i++) {
+    if (results[i]?.isSeparator) hitIndices.push(i);
+  }
+  if (hitIndices.length > 0) {
+    let vNext = 0;
+    async function verifyWorker() {
+      while (vNext < hitIndices.length) {
+        const idx = hitIndices[vNext++];
+        const batchSku = results[idx].sku;
+        const single = await verifySeparatorSingle(imagePaths[idx], partsCache[idx]);
+        if (!single.sku) {
+          results[idx] = {
+            ...results[idx],
+            isSeparator:    false,
+            rejectedSku:    batchSku,
+            verified:       false,
+            verifyMismatch: 'single-says-not-separator',
+            verifyModel:    single.modelUsed,
+          };
+        } else if (single.sku !== batchSku) {
+          results[idx] = {
+            ...results[idx],
+            sku:            single.sku,
+            verified:       true,
+            verifyMismatch: `batch=${batchSku}→single=${single.sku}`,
+            verifyModel:    single.modelUsed,
+          };
+        } else {
+          results[idx] = {
+            ...results[idx],
+            verified:    true,
+            verifyModel: single.modelUsed,
+          };
+        }
+      }
+    }
+    await Promise.all(Array.from(
+      { length: Math.min(SEP_CHUNK_CONCURRENCY, hitIndices.length) },
+      verifyWorker,
+    ));
+  }
+
+  // Recovery-Pass: bei einer Halluzination (rejectedSku) liegt die echte Tüte oft
+  // in unmittelbarer Nähe — der Batch hat sie übersehen, weil er fälschlich die SKU
+  // auf das Nachbarbild geschoben hat. Wir prüfen darum die Negativ-Bilder im
+  // selben Cluster (zwischen den nächsten akzeptierten Separatoren) einzeln nach.
+  const recheckSet = new Set();
+  for (let i = 0; i < results.length; i++) {
+    if (!(results[i]?.rejectedSku && !results[i]?.isSeparator)) continue;
+    for (let s = i - 1; s >= 0 && !results[s]?.isSeparator; s--) recheckSet.add(s);
+    for (let e = i + 1; e < results.length && !results[e]?.isSeparator; e++) recheckSet.add(e);
+    recheckSet.delete(i);
+  }
+  const recheckIndices = [...recheckSet];
+  if (recheckIndices.length > 0) {
+    let rNext = 0;
+    async function recheckWorker() {
+      while (rNext < recheckIndices.length) {
+        const idx = recheckIndices[rNext++];
+        const single = await verifySeparatorSingle(imagePaths[idx], partsCache[idx]);
+        if (single.sku) {
+          results[idx] = {
+            ...results[idx],
+            isSeparator:    true,
+            sku:             single.sku,
+            verified:        true,
+            verifyMismatch: 'rescued-after-batch-miss',
+            verifyModel:     single.modelUsed,
+          };
+        }
+      }
+    }
+    await Promise.all(Array.from(
+      { length: Math.min(SEP_CHUNK_CONCURRENCY, recheckIndices.length) },
+      recheckWorker,
+    ));
+  }
+
+  // SKU-Kollisionen erkennen (zwei Bilder mit identischer SKU = mindestens eines falsch)
+  const skuCount = new Map();
+  for (const r of results) {
+    if (r?.isSeparator && r.sku) skuCount.set(r.sku, (skuCount.get(r.sku) || 0) + 1);
+  }
+  for (let i = 0; i < results.length; i++) {
+    if (results[i]?.isSeparator && skuCount.get(results[i].sku) > 1) {
+      results[i] = { ...results[i], skuCollision: true };
+    }
+  }
 
   return results;
 }
@@ -377,20 +597,19 @@ export async function mockKiAnalyze(imageFiles, opts = {}) {
   } = extracted;
 
   const utilitySet = new Set(Array.isArray(utility_image_indices) ? utility_image_indices : []);
+  const measSet    = new Set(measIdx);
   const orderList  = Array.isArray(product_image_order)
-    ? product_image_order.filter(i => Number.isInteger(i) && i >= 0 && i < files.length && !utilitySet.has(i))
+    ? product_image_order.filter(i => Number.isInteger(i) && i >= 0 && i < files.length && !utilitySet.has(i) && !measSet.has(i))
     : [];
 
   // Indizes von `files` (KI-Subset) auf `imageFiles` (volles Set der Gruppe) mappen.
   // So bleiben auch bei >8 Fotos/Produkt alle hochgeladenen Bilder im Output.
   const filesToInputIdx = files.map(f => imageFiles.indexOf(f));
   const inputUtilitySet = new Set(
-    [...utilitySet].map(i => filesToInputIdx[i]).filter(i => i >= 0)
+    [...utilitySet, ...measSet].map(i => filesToInputIdx[i]).filter(i => i >= 0)
   );
 
-  // KI-Order zuerst (Front, Back, Badge, Patch), dann alles übrige außer Utility.
-  // KI's product_image_order ist nur Reihenfolge-Hinweis, nicht Filter — sonst gingen
-  // Label/Maßband-Fotos verloren, die der Kunde im Output sehen will.
+  // KI-Order zuerst (Front, Back, Badge, Patch), dann verbleibende echte Produktfotos.
   const orderedInputIdx = orderList
     .map(i => filesToInputIdx[i])
     .filter(i => i >= 0);
@@ -402,12 +621,12 @@ export async function mockKiAnalyze(imageFiles, opts = {}) {
     .map(i => imageFiles[i])
     .filter(Boolean);
 
-  // SKU: vom Trennbild-Detektor übernommen, sonst aus dem KI-Ergebnis (4–8 Zeichen alphanumerisch)
-  const overrideRaw = typeof opts.sku === 'string' ? opts.sku.trim().toUpperCase() : '';
-  const overrideSku = /^[A-Z]{0,4}\d{3,8}$/.test(overrideRaw) ? overrideRaw : null;
+  // SKU: vom Trennbild-Detektor übernommen, sonst aus dem KI-Ergebnis. SKUs sind IMMER rein numerisch.
+  const overrideRaw = typeof opts.sku === 'string' ? opts.sku.trim() : '';
+  const overrideSku = /^\d{4,8}$/.test(overrideRaw) ? overrideRaw : null;
   const validSku = overrideSku
-    || ((typeof sku === 'string' || typeof sku === 'number') && /^[A-Z]{0,4}\d{3,8}$/i.test(String(sku).trim())
-        ? String(sku).trim().toUpperCase()
+    || ((typeof sku === 'string' || typeof sku === 'number') && /^\d{4,8}$/.test(String(sku).trim())
+        ? String(sku).trim()
         : null);
 
   const condition = 9;

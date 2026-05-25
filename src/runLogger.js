@@ -66,6 +66,77 @@ export class RunLogger {
     this._append(`  Bilder:    ${imageFiles.length}  →  ${destination}`);
   }
 
+  // Audit-Trail der Separator-Erkennung — eine Zeile pro Bild + Gruppen-Sanity-Check
+  separators(items, groups) {
+    if (!Array.isArray(items) || items.length === 0) return;
+
+    this._append('');
+    this._append('─'.repeat(60));
+    this._append('  PHASE 1 — TRENNBILD-AUDIT');
+    this._append('─'.repeat(60));
+
+    const failedChunks = new Map();
+    for (const it of items) {
+      if (it.chunkFailed && it.chunkIndex != null && !failedChunks.has(it.chunkIndex)) {
+        failedChunks.set(it.chunkIndex, it.failReason || 'unknown');
+      }
+    }
+    if (failedChunks.size > 0) {
+      for (const [idx, reason] of failedChunks) {
+        this._append(`  ⚠ Chunk ${idx} fehlgeschlagen (${reason}) — alle Bilder darin als NICHT-Separator markiert`);
+      }
+      this._append('');
+    }
+
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const base = path.basename(it.path);
+      const sep  = it.isSeparator ? 'Separator: JA ' : 'Separator: nein';
+      const sku  = it.isSeparator
+        ? `SKU=${it.sku}`
+        : (it.rejectedSku ? `verworfen=${it.rejectedSku}` : '             ');
+      const verify = it.verified === true ? 'verify=OK'
+                  : it.verified === false ? `verify=ABGELEHNT(${it.verifyMismatch})`
+                  : '';
+      const meta = [
+        `Gr.${it.groupIndex}`,
+        `Chunk ${it.chunkIndex}`,
+        it.modelUsed || '—',
+        verify,
+        it.skuCollision ? '⚠ SKU-DOPPELT' : '',
+        it.chunkFailed ? `FAIL:${it.failReason}` : '',
+      ].filter(Boolean).join(' | ');
+      this._append(`  ${String(i).padStart(3, '0')}  ${base.padEnd(28)}  ${sep}  ${sku.padEnd(18)}  ${meta}`);
+    }
+
+    this._append('');
+    this._append(`  Gruppen-Übersicht (${groups.length} Gruppen):`);
+
+    const sizes = groups.map(g => g.productImages.length).filter(n => n > 0).sort((a, b) => a - b);
+    const median = sizes.length ? sizes[Math.floor(sizes.length / 2)] : 0;
+    const oversizeThreshold = Math.max(median * 1.8, median + 4);
+
+    for (const g of groups) {
+      const tueten = g.productImages.filter(p =>
+        items.find(it => it.path === p)?.isSeparator
+      );
+      const tuetenIdx = tueten.map(p => items.findIndex(it => it.path === p));
+      const warnings = [];
+      if (tueten.length === 0) warnings.push('⚠ KEINE TÜTE');
+      if (tueten.length >  1) warnings.push(`⚠ ${tueten.length} TÜTEN (doppelt)`);
+      if (String(g.sku).startsWith('UNKNOWN_')) warnings.push('⚠ UNKNOWN-SKU');
+      if (median > 0 && g.productImages.length > oversizeThreshold) {
+        warnings.push(`⚠ überdurchschnittlich groß (Median ${median})`);
+      }
+      const status = warnings.length ? warnings.join(' ') : 'OK';
+      this._append(
+        `    Gruppe ${g.groupIndex}  SKU=${g.sku.padEnd(8)}  ${String(g.productImages.length).padStart(2)} Bilder  Tüten=${tueten.length}${tuetenIdx.length ? ` [${tuetenIdx.join(',')}]` : ''}  ${status}`
+      );
+    }
+    this._append('─'.repeat(60));
+    this._append('');
+  }
+
   duplicate(filePath, originalPath) {
     this.stats.duplicates++;
     this._append(`[${this._ts()}] DUPLIKAT  ${path.basename(filePath)}  (Original: ${path.basename(originalPath)})`);

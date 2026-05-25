@@ -13,7 +13,7 @@ const COUNTRY_ISO = {
   'Ägypten': 'EG', 'Tunesien': 'TN', 'Äthiopien': 'ET', 'Kenia': 'KE',
   'Nigeria': 'NG', 'Madagaskar': 'MG', 'Jordanien': 'JO', 'Syrien': 'SY',
   'Iran': 'IR', 'Peru': 'PE', 'Kolumbien': 'CO', 'Brasilien': 'BR',
-  'Bolivien': 'BO', 'Indien': 'IN',
+  'Bolivien': 'BO',
 };
 
 function toIsoCode(germanName) {
@@ -37,12 +37,12 @@ async function shopifyRequest(shop, token, method, endpoint, body = null) {
   return res.json();
 }
 
-async function uploadProductImage(shop, token, productId, imagePath) {
+async function uploadProductImage(shop, token, productId, imagePath, position) {
   const base64 = fs.readFileSync(imagePath).toString('base64');
   const filename = path.basename(imagePath);
-  const data = await shopifyRequest(shop, token, 'POST', `products/${productId}/images.json`, {
-    image: { attachment: base64, filename }
-  });
+  const image = { attachment: base64, filename };
+  if (Number.isInteger(position) && position > 0) image.position = position;
+  const data = await shopifyRequest(shop, token, 'POST', `products/${productId}/images.json`, { image });
   return data.image;
 }
 
@@ -184,10 +184,11 @@ export async function createShopifyDraft(productData, imageFiles, shop, token) {
   };
 
   const uploadImages = async () => {
-    await Promise.all(imageFiles.map(async (imgPath) => {
+    // position explizit setzen — parallele Uploads würden sonst beliebige Reihenfolge ergeben
+    await Promise.all(imageFiles.map(async (imgPath, i) => {
       try {
-        await uploadProductImage(shop, token, productId, imgPath);
-        console.log(`  Bild hochgeladen: ${path.basename(imgPath)}`);
+        await uploadProductImage(shop, token, productId, imgPath, i + 1);
+        console.log(`  Bild hochgeladen [${i + 1}]: ${path.basename(imgPath)}`);
       } catch (e) {
         warnings.push(`Bild-Upload fehlgeschlagen (${path.basename(imgPath)}): ${e.message}`);
       }

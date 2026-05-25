@@ -134,17 +134,17 @@
     .page {
       max-width: 960px;
       margin: 0 auto;
-      padding: 56px 28px 140px;
+      padding: 24px 28px 140px;
     }
 
-    .page-head { margin-bottom: 40px; }
+    .page-head { margin-bottom: 22px; }
     .page-eyebrow {
       font-size: 11px;
       color: var(--text-2);
       text-transform: uppercase;
       letter-spacing: 0.12em;
       font-weight: 500;
-      margin-bottom: 14px;
+      margin-bottom: 10px;
     }
     .page-title {
       font-size: 36px;
@@ -787,16 +787,46 @@
       border-bottom: 1px solid var(--border);
       margin-bottom: 20px;
     }
+    .modal-thumb-wrap {
+      position: relative; flex-shrink: 0;
+    }
     .modal-thumb-strip img {
       width: 80px; height: 100px; object-fit: cover;
-      border-radius: var(--radius-sm); flex-shrink: 0;
+      border-radius: var(--radius-sm);
       background: var(--bg-3); cursor: pointer;
       opacity: 0.35; transition: opacity .15s, outline .15s;
       outline: 3px solid transparent; outline-offset: 2px;
+      display: block;
     }
-    .modal-thumb-strip img.shopify-selected {
+    .modal-thumb-wrap.is-selected img {
       opacity: 1; outline: 4px solid #22c55e;
     }
+    .modal-thumb-pos {
+      position: absolute; top: 4px; left: 4px;
+      background: #22c55e; color: #fff;
+      min-width: 20px; height: 20px; padding: 0 6px;
+      border-radius: 99px;
+      font-size: 11px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      pointer-events: none; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+    .modal-thumb-handle {
+      position: absolute; bottom: 4px; right: 4px;
+      width: 24px; height: 24px;
+      background: rgba(0,0,0,0.7); color: #fff;
+      border-radius: 5px;
+      font-size: 13px; line-height: 1; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      cursor: grab; user-select: none; touch-action: none;
+      opacity: 0; transition: opacity .15s;
+    }
+    .modal-thumb-wrap.is-selected:hover .modal-thumb-handle,
+    .modal-thumb-wrap.is-selected.is-dragging .modal-thumb-handle { opacity: 1; }
+    @media (pointer: coarse) {
+      .modal-thumb-wrap.is-selected .modal-thumb-handle { opacity: 1; }
+    }
+    .modal-thumb-wrap.is-dragging { opacity: 0.55; }
+    .modal-thumb-wrap.drag-over img { outline-color: #fff; }
     .modal-img-counter {
       font-size: 12px; color: var(--text-3);
       padding: 6px 0 2px; flex-basis: 100%;
@@ -930,11 +960,24 @@
       font-size: 13px; color: var(--text-2); margin-top: 6px; display: block;
     }
 
-    .ki-card { cursor: pointer; }
+    .ki-card { cursor: pointer; position: relative; }
     .ki-card-arrow {
       margin-left: auto; color: var(--text-3); font-size: 16px;
       align-self: center; flex-shrink: 0;
     }
+    .ki-card-delete {
+      position: absolute; top: 10px; right: 10px;
+      width: 28px; height: 28px;
+      background: rgba(0,0,0,0.55); color: #fff;
+      border: 1px solid rgba(255,255,255,0.18); border-radius: 50%;
+      font-size: 14px; line-height: 1; cursor: pointer; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      opacity: 0; transition: opacity .15s ease, background .15s ease, color .15s ease;
+      backdrop-filter: blur(4px); z-index: 2;
+    }
+    .ki-card:hover .ki-card-delete { opacity: 1; }
+    .ki-card-delete:hover { background: var(--red); color: #fff; }
+    @media (pointer: coarse) { .ki-card-delete { opacity: 1; } }
   </style>
 </head>
 <body>
@@ -944,10 +987,6 @@
   <header class="topbar">
     <div class="brand">
       <img class="brand-logo" src="/logo.png" alt="Veyroze">
-    </div>
-    <div class="status">
-      <span class="status-dot"></span>
-      <span>Live</span>
     </div>
   </header>
 
@@ -970,10 +1009,6 @@
         </div>
         <input type="file" id="cameraInput"  accept="image/*" capture="environment">
         <input type="file" id="galleryInput" accept="image/*" multiple>
-
-        <div id="addProductRow" style="display:none;margin-bottom:14px;">
-          <button class="btn btn-secondary btn-block" onclick="addNewProduct()">+ Weiteres Produkt hinzufügen</button>
-        </div>
 
         <div class="groups-area" id="groupsArea">
           <div class="empty-state" id="emptyState">
@@ -1249,11 +1284,15 @@ async function saveState() {
 }
 
 async function saveProductsState() {
-  if (_restoring || !allProducts.length) return;
+  if (_restoring) return;
   try {
     const db = await getDB();
     const tx = db.transaction('state', 'readwrite');
-    tx.objectStore('state').put({ key: 'products', data: allProducts, runId });
+    if (allProducts.length) {
+      tx.objectStore('state').put({ key: 'products', data: allProducts, runId });
+    } else {
+      tx.objectStore('state').delete('products');
+    }
     await new Promise((r, j) => { tx.oncomplete = r; tx.onerror = j; });
   } catch(e) { console.error('saveProductsState:', e); }
 }
@@ -1822,6 +1861,7 @@ function renderKiCard(p, idx, container) {
     : '';
 
   card.innerHTML = `
+    <button class="ki-card-delete" title="Produkt entfernen" aria-label="Produkt entfernen">×</button>
     <div class="ki-card-top">
       ${thumbHtml}
       <div class="ki-meta">
@@ -1840,7 +1880,23 @@ function renderKiCard(p, idx, container) {
       <span class="ki-card-arrow">›</span>
     </div>`;
 
+  card.querySelector('.ki-card-delete').addEventListener('click', (e) => {
+    e.stopPropagation();
+    removeProductFromOutput(idx);
+  });
+
   container.appendChild(card);
+}
+
+function removeProductFromOutput(idx) {
+  const p = allProducts[idx];
+  if (!p) return;
+  const label = p.ki?.titel_vorschlag || p.label || `Produkt ${idx + 1}`;
+  if (!confirm(`"${label}" wirklich aus dem Output entfernen?`)) return;
+  allProducts.splice(idx, 1);
+  renderSummary();
+  renderFilteredList();
+  saveProductsState();
 }
 
 let currentModalIdx = null;
@@ -1951,7 +2007,16 @@ function openProductModal(idx) {
   warn.style.display = ki.konfidenz === 'niedrig' ? '' : 'none';
 
   if (!p._allImages) p._allImages = p.allImages?.length ? [...p.allImages] : [...(p.images || [])];
-  if (!(p.shopifyImages instanceof Set)) p.shopifyImages = new Set(p.images || []);
+  if (!Array.isArray(p.shopifyOrder)) {
+    if (p.shopifyImages instanceof Set) {
+      p.shopifyOrder = p._allImages.filter(s => p.shopifyImages.has(s));
+      delete p.shopifyImages;
+    } else {
+      p.shopifyOrder = Array.isArray(p.images) ? [...p.images] : [...p._allImages];
+    }
+  }
+  p.images    = [...p.shopifyOrder];
+  p.thumbnail = p.images[0] || p.thumbnail;
   const strip = document.getElementById('modalThumbStrip');
   strip.style.display = p._allImages.length ? '' : 'none';
   refreshModalStrip(idx);
@@ -1977,34 +2042,128 @@ function openProductModal(idx) {
   document.getElementById('modalOverlay').classList.add('active');
 }
 
-function toggleShopifyImage(productIdx, imgIdx) {
+function toggleShopifyImage(productIdx, src) {
   const p = allProducts[productIdx];
-  const allImgs = p._allImages || [];
-  const src = allImgs[imgIdx];
   if (!src) return;
-  if (p.shopifyImages.has(src)) {
-    p.shopifyImages.delete(src);
-  } else {
-    p.shopifyImages.add(src);
-  }
-  p.images = allImgs.filter(s => p.shopifyImages.has(s));
+  if (!Array.isArray(p.shopifyOrder)) p.shopifyOrder = [];
+  const i = p.shopifyOrder.indexOf(src);
+  if (i >= 0) p.shopifyOrder.splice(i, 1);
+  else p.shopifyOrder.push(src);
+  p.images = [...p.shopifyOrder];
   p.thumbnail = p.images[0] || p.thumbnail;
   refreshModalStrip(productIdx);
+  saveProductsState();
 }
 
 function refreshModalStrip(productIdx) {
   const p = allProducts[productIdx];
   const allImgs = p._allImages || [];
+  const order   = Array.isArray(p.shopifyOrder) ? p.shopifyOrder : [];
+  const selectedSet = new Set(order);
+  const unselected  = allImgs.filter(s => !selectedSet.has(s));
+
   const strip = document.getElementById('modalThumbStrip');
-  strip.innerHTML = allImgs.map((src, i) => {
-    const sel = p.shopifyImages?.has(src);
-    return `<img src="${src}" class="${sel ? 'shopify-selected' : ''}"
-      onclick="toggleShopifyImage(${productIdx}, ${i})"
-      onerror="this.style.display='none'">`;
-  }).join('');
+  strip.innerHTML = '';
+
+  // Ausgewählte: mit Position-Badge + Drag-Handle in shopifyOrder-Reihenfolge
+  order.forEach((src, i) => {
+    const w = document.createElement('div');
+    w.className = 'modal-thumb-wrap is-selected';
+    w.dataset.src = src;
+    w.innerHTML = `
+      <img src="${src}" onerror="this.style.display='none'">
+      <span class="modal-thumb-pos">${i + 1}</span>
+      <span class="modal-thumb-handle" title="Reihenfolge ändern">⠿</span>
+    `;
+    w.querySelector('img').addEventListener('click', () => toggleShopifyImage(productIdx, src));
+    strip.appendChild(w);
+  });
+
+  // Nicht ausgewählte: ohne Badge/Handle, klick zum Hinzufügen
+  unselected.forEach(src => {
+    const w = document.createElement('div');
+    w.className = 'modal-thumb-wrap';
+    w.dataset.src = src;
+    w.innerHTML = `<img src="${src}" onerror="this.style.display='none'">`;
+    w.querySelector('img').addEventListener('click', () => toggleShopifyImage(productIdx, src));
+    strip.appendChild(w);
+  });
+
+  makeModalStripSortable(strip, productIdx);
+
   const counter = document.getElementById('shopifyImageCount');
   if (counter) counter.textContent =
-    `${p.shopifyImages?.size ?? 0} von ${allImgs.length} für Shopify ausgewählt`;
+    `${order.length} von ${allImgs.length} für Shopify ausgewählt`;
+}
+
+function makeModalStripSortable(container, productIdx) {
+  if (container._sortableBound) return;
+  container._sortableBound = true;
+  let drag = null;
+
+  function onStart(x, y, wrap) {
+    if (!wrap || !wrap.classList.contains('is-selected')) return;
+    drag = { wrap, over: null };
+    wrap.classList.add('is-dragging');
+  }
+  function onMove(x, y) {
+    if (!drag) return;
+    drag.wrap.style.visibility = 'hidden';
+    const under = document.elementFromPoint(x, y)?.closest('.modal-thumb-wrap.is-selected');
+    drag.wrap.style.visibility = '';
+    container.querySelectorAll('.modal-thumb-wrap').forEach(w => w.classList.remove('drag-over'));
+    if (under && under !== drag.wrap) { under.classList.add('drag-over'); drag.over = under; }
+    else drag.over = null;
+  }
+  function onEnd() {
+    if (!drag) return;
+    const wrapEl = drag.wrap;
+    const overEl = drag.over;
+    drag = null;
+    container.querySelectorAll('.modal-thumb-wrap').forEach(w => w.classList.remove('drag-over', 'is-dragging'));
+    if (!overEl) return;
+    const p = allProducts[productIdx];
+    if (!p || !Array.isArray(p.shopifyOrder)) return;
+    const from = p.shopifyOrder.indexOf(wrapEl.dataset.src);
+    const to   = p.shopifyOrder.indexOf(overEl.dataset.src);
+    if (from < 0 || to < 0 || from === to) return;
+    const [item] = p.shopifyOrder.splice(from, 1);
+    p.shopifyOrder.splice(to, 0, item);
+    p.images    = [...p.shopifyOrder];
+    p.thumbnail = p.images[0] || p.thumbnail;
+    refreshModalStrip(productIdx);
+    saveProductsState();
+  }
+
+  container.addEventListener('touchstart', e => {
+    const handle = e.target.closest('.modal-thumb-handle');
+    if (!handle) return;
+    onStart(e.touches[0].clientX, e.touches[0].clientY, handle.closest('.modal-thumb-wrap'));
+    e.preventDefault();
+  }, { passive: false });
+  container.addEventListener('touchmove', e => {
+    if (!drag) return;
+    e.preventDefault();
+    onMove(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: false });
+  container.addEventListener('touchend', onEnd);
+
+  container.addEventListener('mousedown', e => {
+    const handle = e.target.closest('.modal-thumb-handle');
+    if (!handle) return;
+    e.preventDefault();
+    onStart(e.clientX, e.clientY, handle.closest('.modal-thumb-wrap'));
+    document.documentElement.style.userSelect = 'none';
+    const move = ev => { ev.preventDefault(); onMove(ev.clientX, ev.clientY); };
+    const up   = () => {
+      onEnd();
+      document.documentElement.style.userSelect = '';
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  });
 }
 
 function closeModal() {
