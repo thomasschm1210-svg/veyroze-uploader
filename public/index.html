@@ -1680,7 +1680,7 @@ function startSSE() {
     const p = JSON.parse(e.data);
     allProducts.push(p);
     if (document.getElementById('screen-progress').classList.contains('active')) {
-      currentFilter = 'all';
+      currentFilter = 'analyzed';
       showScreen('screen-products');
       document.getElementById('productList').innerHTML = '';
       renderSummary();
@@ -1758,12 +1758,12 @@ function setOverall(pct) {
 }
 
 // ── Products screen ──────────────────────────────────────────────────────────
-let currentFilter = 'all';
+let currentFilter = 'analyzed';
 let _stats = {};
 function showProducts({ products, stats }) {
   allProducts = products || [];
   _stats = stats || {};
-  currentFilter = 'all';
+  currentFilter = 'analyzed';
   showScreen('screen-products');
   renderSummary();
   renderFilteredList();
@@ -1773,23 +1773,16 @@ function showProducts({ products, stats }) {
 function renderSummary() {
   const s = _stats;
   const savedCount = allProducts.filter(p => p._shopifyDone).length;
+  const analyzedCount = allProducts.filter(p => !p._shopifyDone).length + (s.duplicates ?? 0);
   const summaryRow = document.getElementById('summaryRow');
   summaryRow.innerHTML = `
-    <div class="summary-card ok${currentFilter === 'all' ? ' active' : ''}" onclick="setFilter('all')">
-      <div class="summary-num">${s.processed ?? allProducts.length}</div>
-      <div class="summary-label">Processed</div>
+    <div class="summary-card ok${currentFilter === 'analyzed' ? ' active' : ''}" onclick="setFilter('analyzed')">
+      <div class="summary-num">${analyzedCount}</div>
+      <div class="summary-label">Analysiert</div>
     </div>
-    <div class="summary-card review${currentFilter === 'review' ? ' active' : ''}" onclick="setFilter('review')">
-      <div class="summary-num">${allProducts.filter(p => p.isReview && !p._shopifyDone).length}</div>
-      <div class="summary-label">For Review</div>
-    </div>
-    <div class="summary-card dupe${currentFilter === 'dupes' ? ' active' : ''}" onclick="setFilter('dupes')">
-      <div class="summary-num">${s.duplicates ?? 0}</div>
-      <div class="summary-label">Duplicates</div>
-    </div>
-    <div class="summary-card saved${currentFilter === 'saved' ? ' active' : ''}" onclick="setFilter('saved')">
+    <div class="summary-card saved${currentFilter === 'shopify' ? ' active' : ''}" onclick="setFilter('shopify')">
       <div class="summary-num">${savedCount}</div>
-      <div class="summary-label">Saved</div>
+      <div class="summary-label">Auf Shopify</div>
     </div>`;
 }
 
@@ -1804,16 +1797,15 @@ function renderFilteredList() {
   list.innerHTML = '';
 
   let visible = allProducts.map((p, idx) => ({ p, idx }));
-  if (currentFilter === 'review')  visible = visible.filter(({ p }) => p.isReview && !p._shopifyDone);
-  if (currentFilter === 'saved')   visible = visible.filter(({ p }) => p._shopifyDone);
-  if (currentFilter === 'dupes')   visible = [];  // duplicates are not in allProducts (filtered pre-pipeline)
+  if (currentFilter === 'shopify')  visible = visible.filter(({ p }) => p._shopifyDone);
+  if (currentFilter === 'analyzed') visible = visible.filter(({ p }) => !p._shopifyDone);
 
   const subtitle = document.getElementById('productsSubtitle');
-  if (currentFilter === 'all') {
-    const photoSum = allProducts.reduce((s, x) => s + (x.images?.length || 0), 0);
-    subtitle.textContent = `${allProducts.length} Produkt${allProducts.length !== 1 ? 'e' : ''} erkannt aus ${photoSum} Foto${photoSum !== 1 ? 's' : ''}`;
+  if (currentFilter === 'analyzed') {
+    const photoSum = visible.reduce((s, { p }) => s + (p.images?.length || 0), 0);
+    subtitle.textContent = `${visible.length} Produkt${visible.length !== 1 ? 'e' : ''} erkannt aus ${photoSum} Foto${photoSum !== 1 ? 's' : ''}`;
   } else {
-    subtitle.textContent = `${visible.length} Produkt${visible.length !== 1 ? 'e' : ''} · ${currentFilter}`;
+    subtitle.textContent = `${visible.length} Produkt${visible.length !== 1 ? 'e' : ''} · Auf Shopify`;
   }
 
   if (visible.length === 0) {
@@ -2258,7 +2250,7 @@ async function shopifySingle(idx) {
     const list    = document.getElementById('productList');
     const oldCard = document.getElementById(`ki-card-${idx}`);
     if (oldCard) {
-      if (currentFilter === 'saved' || currentFilter === 'all') {
+      if (currentFilter === 'shopify') {
         const temp = document.createElement('div');
         renderKiCard(p, idx, temp);
         list.replaceChild(temp.firstChild, oldCard);
