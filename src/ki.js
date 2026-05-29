@@ -27,6 +27,7 @@ Extract ALL of the following and return ONLY valid JSON, no markdown, no explana
   },
   "country_of_origin": "country from wash care tag in German (e.g. Mexiko, Pakistan, Bangladesch, Indien, China, Türkei) — null if not visible",
   "sku": "5-digit integer or null — ONLY from a handwritten number on a plastic bag. NEVER a printed number. NEVER fewer or more than 5 digits.",
+  "is_new_with_tags": false,
   "confidence": "high | medium | low",
   "utility_image_indices": [2, 4],
   "measurement_image_indices": [1, 3, 5],
@@ -59,6 +60,7 @@ Rules:
 - Read size_w and size_l as integers from the label (e.g. W30/L34 → size_w: 30, size_l: 34)
 - If a value is truly not determinable, use null
 - confidence reflects overall certainty across all extracted fields
+- is_new_with_tags: true ONLY if a brand-new hangtag is clearly visible — a paper or cardboard price/brand tag attached with a plastic string, tag-pin or thread to the waistband, belt loop, or pocket. Typically red/white "Standard" Levi's tags, brand labels with size info ("W28 L34"), barcodes, or price tickets that are NOT sewn in. The presence of such an external hangtag indicates the jeans are unworn/new. Set to false if no such hangtag is visible — most secondhand jeans have NO hangtag. Inner sewn-in labels (brand patch, model badge, wash care tag) do NOT count.
 - utility_image_indices: 0-based indices of images that should NOT appear in the Shopify listing — filter out ALL of: (1) photos where a ruler or tape measure is placed next to the jeans, (2) photos showing only a SKU bag or sticker, (3) photos showing only a wash care tag / laundry label (the sewn-in tag with washing symbols and country of origin — NOT a brand patch or model name badge). Do NOT filter out brand patches, model badges, or inner waistband labels — those are valid product photos. Use [] if no images need filtering.
 - measurement_image_indices: 0-based indices of ALL photos that show a ruler or measuring tape next to the jeans (these are the measurement photos). Include every image where a Zollstock is visible. Use [] if none.
 - product_image_order: 0-based indices of product photos in this EXACT order for the Shopify listing (matches veyroze.com store pattern):
@@ -168,12 +170,14 @@ function buildTitle(brand, model, fit, sizeW, sizeL) {
 }
 
 function formatCondition(val) {
+  if (typeof val === 'string' && val.toLowerCase().trim() === 'new with tags') return 'new with tags';
   const n = parseFloat(val);
   if (isNaN(n)) return null;
   return n >= 10 ? 'top' : `${n}/10`;
 }
 
 function conditionFromText(val) {
+  if (typeof val === 'string' && val.toLowerCase().trim() === 'new with tags') return 'new with tags';
   if (typeof val === 'number') return Math.round(Math.min(10, Math.max(0.5, val)) * 2) / 2;
   const map = { 'top': 10, 'very good': 9, 'good': 8, 'acceptable': 6.5 };
   return map[String(val).toLowerCase().trim()] ?? null;
@@ -591,6 +595,7 @@ export async function mockKiAnalyze(imageFiles, opts = {}) {
     measurements  = {},
     country_of_origin = null,
     sku           = null,
+    is_new_with_tags = false,
     confidence    = 'medium',
     utility_image_indices = [],
     product_image_order = [],
@@ -629,7 +634,9 @@ export async function mockKiAnalyze(imageFiles, opts = {}) {
         ? String(sku).trim()
         : null);
 
-  const condition = 9;
+  const newWithTags = is_new_with_tags === true;
+  const condition = newWithTags ? 'new with tags' : 9;
+  const hsCode = newWithTags ? '6203420' : '6309000';
 
   // Längenkorrektur: gemessene Länge < 100cm → L-Größe nach unten korrigieren
   const correctedL    = lengthLabel(size_l, measurements.length_cm);
@@ -645,6 +652,7 @@ export async function mockKiAnalyze(imageFiles, opts = {}) {
 
   const tags = ['KI', taxTag];
   if (size_w) tags.push(`W${size_w}`);
+  if (newWithTags) tags.push('new with tags');
 
   const collections = ['Jeans'];
   if (size_w) collections.push(`W${size_w}`);
@@ -686,7 +694,8 @@ export async function mockKiAnalyze(imageFiles, opts = {}) {
     tags,
     collections,
     shipping_weight_kg: weight,
-    hs_code:         '6309000',
+    hs_code:         hsCode,
+    is_new_with_tags: newWithTags,
     product_images:  productFiles,
     measurement_images: measIdx.map(i => imageFiles[filesToInputIdx[i]] ?? files[i]).filter(Boolean),
   };
