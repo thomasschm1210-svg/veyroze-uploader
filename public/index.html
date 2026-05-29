@@ -90,9 +90,7 @@
       height: var(--topbar-h);
       padding: 0 28px;
       display: flex; align-items: center; justify-content: space-between;
-      background: rgba(0,0,0,0.72);
-      backdrop-filter: blur(20px) saturate(180%);
-      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      background: rgba(10,10,12,0.96);
       border-bottom: 1px solid var(--border);
     }
 
@@ -332,7 +330,6 @@
       cursor: pointer; font-weight: 700;
       display: flex; align-items: center; justify-content: center;
       opacity: 0; transition: opacity .15s ease;
-      backdrop-filter: blur(4px);
     }
     .thumb-wrap:hover .thumb-remove { opacity: 1; }
     @media (pointer: coarse) { .thumb-remove { opacity: 1; } }
@@ -402,9 +399,7 @@
       bottom: calc(24px + env(safe-area-inset-bottom));
       display: flex; gap: 10px;
       padding: 10px;
-      background: rgba(19,19,22,0.86);
-      backdrop-filter: blur(20px) saturate(180%);
-      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      background: rgba(19,19,22,0.98);
       border: 1px solid var(--border-h);
       border-radius: 14px;
       box-shadow: var(--shadow-2);
@@ -753,7 +748,7 @@
     /* ── Product Modal ───────────────────────────── */
     .modal-overlay {
       display: none; position: fixed; inset: 0; z-index: 200;
-      background: rgba(0,0,0,0.7); backdrop-filter: blur(4px);
+      background: rgba(0,0,0,0.85);
       align-items: flex-end; justify-content: center;
     }
     .modal-overlay.active { display: flex; }
@@ -781,6 +776,20 @@
       display: flex; align-items: center; justify-content: center;
     }
     .modal-close:hover { background: var(--border); color: var(--text-0); }
+    .modal-next-btn {
+      width: 44px; height: 44px; border-radius: 50%;
+      background: var(--text-0); color: var(--bg-0);
+      border: none; cursor: pointer;
+      font-size: 22px; font-weight: 700; line-height: 1;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: var(--shadow-1);
+      transition: transform .12s ease, box-shadow .15s ease;
+    }
+    .modal-next-btn:hover {
+      background: #ffffff;
+      transform: translateX(2px);
+      box-shadow: 0 4px 16px -4px rgba(255,255,255,0.25);
+    }
     .modal-thumb-strip {
       display: flex; gap: 8px; padding: 14px 0 14px;
       flex-wrap: wrap;
@@ -936,9 +945,7 @@
     /* ── Drop overlay ────────────────────────────── */
     #dropOverlay {
       display: none; position: fixed; inset: 0; z-index: 90;
-      background: rgba(0,0,0,0.6);
-      backdrop-filter: blur(6px);
-      -webkit-backdrop-filter: blur(6px);
+      background: rgba(0,0,0,0.85);
       align-items: center; justify-content: center;
       pointer-events: none;
     }
@@ -973,7 +980,7 @@
       font-size: 14px; line-height: 1; cursor: pointer; font-weight: 700;
       display: flex; align-items: center; justify-content: center;
       opacity: 0; transition: opacity .15s ease, background .15s ease, color .15s ease;
-      backdrop-filter: blur(4px); z-index: 2;
+      z-index: 2;
     }
     .ki-card:hover .ki-card-delete { opacity: 1; }
     .ki-card-delete:hover { background: var(--red); color: #fff; }
@@ -1099,7 +1106,10 @@
   <div class="modal" id="modal">
     <div class="modal-header">
       <span class="modal-header-title" id="modalTitle">Product</span>
-      <button class="modal-close" onclick="closeModal()">×</button>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button class="modal-next-btn" id="modalNextBtn" onclick="nextProductModal()" title="Nächstes Produkt">→</button>
+        <button class="modal-close" onclick="closeModal()">×</button>
+      </div>
     </div>
     <div class="modal-body">
     <div class="modal-thumb-strip" id="modalThumbStrip"></div>
@@ -1271,9 +1281,10 @@ async function saveState() {
     // Convert blobs → ArrayBuffers (iOS-safe, no File-object cloning issues)
     const data = await Promise.all(groups.map(grp =>
       Promise.all(grp.map(async item => ({
-        name: item.name,
-        type: item.blob?.type || 'image/jpeg',
-        buf:  await item.blob.arrayBuffer(),
+        name:     item.name,
+        type:     item.blob?.type || 'image/jpeg',
+        buf:      await item.blob.arrayBuffer(),
+        thumbBuf: item.thumb ? await item.thumb.arrayBuffer() : null,
       })))
     ));
     const db = await getDB();
@@ -1311,8 +1322,11 @@ async function restoreState() {
     if (rec?.data) {
       groups = rec.data.map(grp =>
         grp.map(item => {
-          const blob = new Blob([item.buf], { type: item.type });
-          return { blob, url: URL.createObjectURL(blob), name: item.name };
+          const blob  = new Blob([item.buf], { type: item.type });
+          const thumb = item.thumbBuf
+            ? new Blob([item.thumbBuf], { type: 'image/jpeg' })
+            : blob;
+          return { blob, thumb, url: URL.createObjectURL(thumb), name: item.name };
         })
       );
       if (!groups.length) groups = [[]];
@@ -1334,11 +1348,47 @@ async function restoreState() {
   finally { _restoring = false; }
 }
 
+async function processImage(file) {
+  const bmp = await createImageBitmap(file);
+
+  const make = async (maxPx, quality) => {
+    const scale = Math.min(1, maxPx / Math.max(bmp.width, bmp.height));
+    const w = Math.round(bmp.width  * scale);
+    const h = Math.round(bmp.height * scale);
+    const canvas = ('OffscreenCanvas' in window)
+      ? new OffscreenCanvas(w, h)
+      : Object.assign(document.createElement('canvas'), { width: w, height: h });
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bmp, 0, 0, w, h);
+    return canvas.convertToBlob
+      ? await canvas.convertToBlob({ type: 'image/jpeg', quality })
+      : await new Promise(r => canvas.toBlob(r, 'image/jpeg', quality));
+  };
+
+  const [thumb, upload] = await Promise.all([
+    make(400,  0.7),
+    make(2048, 0.85),
+  ]);
+  bmp.close?.();
+  return { thumb, upload };
+}
+
 async function addFiles(files) {
   if (!files?.length) return;
+  files = Array.from(files);
   const idx = activeGroupIdx();
   for (const f of files) {
-    groups[idx].push({ blob: f, url: URL.createObjectURL(f), name: f.name || 'photo.jpg' });
+    try {
+      const { thumb, upload } = await processImage(f);
+      groups[idx].push({
+        blob:  upload,
+        thumb: thumb,
+        url:   URL.createObjectURL(thumb),
+        name:  f.name || 'photo.jpg',
+      });
+    } catch {
+      groups[idx].push({ blob: f, url: URL.createObjectURL(f), name: f.name || 'photo.jpg' });
+    }
   }
   await saveState();
   renderGroups();
@@ -1973,7 +2023,8 @@ function openProductModal(idx) {
   const ki = p.ki || {};
   currentModalIdx = idx;
 
-  document.getElementById('modalTitle').textContent = `Product ${p.index || idx + 1}`;
+  const skuLabel = ki.sku ? ` · SKU: ${ki.sku}` : '';
+  document.getElementById('modalTitle').textContent = `Product ${p.index || idx + 1}${skuLabel}`;
   document.getElementById('m-title').value      = ki.titel_vorschlag || '';
   document.getElementById('m-brand').value      = ki.marke || '';
   document.getElementById('m-model').value      = ki.modell || '';
@@ -2201,9 +2252,22 @@ function handleOverlayClick(e) {
 
 function shopifyFromModal() {
   if (currentModalIdx === null) return;
-  const idx = currentModalIdx;
+  const idx     = currentModalIdx;
+  const nextIdx = idx + 1;
   closeModal();
   shopifySingle(idx);
+  if (nextIdx < allProducts.length) {
+    openProductModal(nextIdx);
+  }
+}
+
+function nextProductModal() {
+  if (currentModalIdx === null) return;
+  const nextIdx = currentModalIdx + 1;
+  closeModal();
+  if (nextIdx < allProducts.length) {
+    openProductModal(nextIdx);
+  }
 }
 
 // ── Shopify API ───────────────────────────────────────────────────────────────
@@ -2350,7 +2414,7 @@ function showToast(msg) {
     document.body.appendChild(wrap);
   }
   const t = document.createElement('div');
-  t.style.cssText = 'background:rgba(48,209,88,0.12);border:1px solid rgba(48,209,88,0.25);color:var(--green);padding:12px 16px;border-radius:10px;font-size:13.5px;font-weight:500;margin-top:8px;text-align:center;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);';
+  t.style.cssText = 'background:rgba(48,209,88,0.12);border:1px solid rgba(48,209,88,0.25);color:var(--green);padding:12px 16px;border-radius:10px;font-size:13.5px;font-weight:500;margin-top:8px;text-align:center;';
   t.textContent = msg;
   wrap.appendChild(t);
   setTimeout(() => t.remove(), 3000);
