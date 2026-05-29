@@ -18,7 +18,13 @@ fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const app = express();
 app.use(securityHeaders());
-app.use(express.static(PUBLIC_DIR));
+app.use(express.static(PUBLIC_DIR, {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-store, must-revalidate');
+    }
+  },
+}));
 
 
 // ── SSE clients keyed by runId ──────────────────────────────────────────────

@@ -158,6 +158,10 @@
     }
 
     /* ── Buttons ─────────────────────────────── */
+    .btn, button, [role="button"] {
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
     .btn {
       display: inline-flex; align-items: center; justify-content: center; gap: 8px;
       padding: 13px 22px;
@@ -169,6 +173,8 @@
       white-space: nowrap;
       -webkit-appearance: none; appearance: none;
       border: 1px solid transparent;
+      cursor: pointer;
+      user-select: none;
     }
     .btn:active { transform: scale(0.985); }
     .btn:disabled { opacity: 0.4; pointer-events: none; }
@@ -757,9 +763,14 @@
       border-radius: var(--radius) var(--radius) 0 0;
       width: 100%; max-width: 600px;
       max-height: 92vh;
+      max-height: 92dvh;
       display: flex; flex-direction: column;
       overflow: hidden;
       animation: slideUp .22s ease;
+      will-change: transform;
+    }
+    @media (max-width: 720px) {
+      .modal { max-height: 96vh; max-height: 96dvh; }
     }
     @keyframes slideUp { from { transform: translateY(40px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
     .modal-header {
@@ -770,10 +781,11 @@
     }
     .modal-header-title { font-size: 15px; font-weight: 600; color: var(--text-0); }
     .modal-close {
-      width: 28px; height: 28px; border-radius: 50%;
+      width: 36px; height: 36px; border-radius: 50%;
       background: var(--bg-3); border: none; cursor: pointer;
-      font-size: 14px; color: var(--text-1);
+      font-size: 18px; color: var(--text-1);
       display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
     }
     .modal-close:hover { background: var(--border); color: var(--text-0); }
     .modal-next-btn {
@@ -832,7 +844,8 @@
     .modal-thumb-wrap.is-selected:hover .modal-thumb-handle,
     .modal-thumb-wrap.is-selected.is-dragging .modal-thumb-handle { opacity: 1; }
     @media (pointer: coarse) {
-      .modal-thumb-wrap.is-selected .modal-thumb-handle { opacity: 1; }
+      .modal-thumb-wrap.is-selected .modal-thumb-handle { opacity: 1; width: 32px; height: 32px; font-size: 16px; }
+      .thumb-handle { height: 28px; font-size: 11px; }
     }
     .modal-thumb-wrap.is-dragging { opacity: 0.55; }
     .modal-thumb-wrap.drag-over img { outline-color: #fff; }
@@ -900,9 +913,9 @@
         font-size: 14px; text-transform: none; letter-spacing: 0;
         font-weight: 400; color: var(--text-0); flex-shrink: 0;
       }
-      .measurements-fields .num-stepper { width: 140px; flex-shrink: 0; }
-      .step-btn { width: 36px; min-width: 36px; font-size: 20px; }
-      .num-stepper input { padding: 10px 4px; font-size: 15px; text-align: center; }
+      .measurements-fields .num-stepper { width: 160px; flex-shrink: 0; }
+      .step-btn { width: 48px; min-width: 48px; min-height: 48px; font-size: 22px; }
+      .num-stepper input { padding: 12px 4px; font-size: 16px; text-align: center; }
       .measurements-viewer { width: 100%; align-items: stretch; }
       #measImg { max-height: 260px; min-height: 120px; width: 100%; object-fit: contain; }
       #measNavBtn { width: 100%; }
@@ -1140,7 +1153,7 @@
           <label>Condition</label>
           <div class="num-stepper">
             <button class="step-btn" type="button" onclick="stepCondition(-0.5)">−</button>
-            <input type="number" id="m-condition" placeholder="8.5" step="0.5" min="0.5" max="10" oninput="syncConditionToDescription()">
+            <input type="text" id="m-condition" placeholder="8.5" inputmode="decimal" autocomplete="off" oninput="syncConditionToDescription()">
             <button class="step-btn" type="button" onclick="stepCondition(0.5)">+</button>
           </div>
         </div>
@@ -1150,7 +1163,7 @@
         </div>
         <div class="modal-field">
           <label>SKU</label>
-          <input type="text" id="m-sku" placeholder="Nummer vom Tütchen">
+          <input type="text" id="m-sku" placeholder="Nummer vom Tütchen" inputmode="numeric" autocomplete="off">
         </div>
         <div class="modal-field">
           <label>Herkunftsland</label>
@@ -1162,7 +1175,7 @@
               <label>Length (cm)</label>
               <div class="num-stepper">
                 <button class="step-btn" type="button" onclick="stepInput('m-len',-0.5)">−</button>
-                <input type="number" id="m-len" placeholder="98" step="0.5" oninput="syncMeasToDescription('m-len')">
+                <input type="number" id="m-len" placeholder="98" step="0.5" inputmode="decimal" oninput="syncMeasToDescription('m-len')">
                 <button class="step-btn" type="button" onclick="stepInput('m-len',0.5)">+</button>
               </div>
             </div>
@@ -1170,7 +1183,7 @@
               <label>Waist (cm)</label>
               <div class="num-stepper">
                 <button class="step-btn" type="button" onclick="stepInput('m-waist',-0.5)">−</button>
-                <input type="number" id="m-waist" placeholder="42" step="0.5" oninput="syncMeasToDescription('m-waist')">
+                <input type="number" id="m-waist" placeholder="42" step="0.5" inputmode="decimal" oninput="syncMeasToDescription('m-waist')">
                 <button class="step-btn" type="button" onclick="stepInput('m-waist',0.5)">+</button>
               </div>
             </div>
@@ -1178,7 +1191,7 @@
               <label>Leg opening (cm)</label>
               <div class="num-stepper">
                 <button class="step-btn" type="button" onclick="stepInput('m-legopening',-0.5)">−</button>
-                <input type="number" id="m-legopening" placeholder="20" step="0.5" oninput="syncMeasToDescription('m-legopening')">
+                <input type="number" id="m-legopening" placeholder="20" step="0.5" inputmode="decimal" oninput="syncMeasToDescription('m-legopening')">
                 <button class="step-btn" type="button" onclick="stepInput('m-legopening',0.5)">+</button>
               </div>
             </div>
@@ -1190,7 +1203,7 @@
         </div>
         <div class="modal-field">
           <label>Preis (€)</label>
-          <input type="number" id="m-price" placeholder="29.90" step="0.5" min="0">
+          <input type="number" id="m-price" placeholder="29.90" step="0.5" min="0" inputmode="decimal">
         </div>
         <div class="modal-field full">
           <label>Tags</label>
@@ -1255,7 +1268,14 @@ document.getElementById('cameraInput').addEventListener('change', e => {
 
 function openGallery() { document.getElementById('galleryInput').click(); }
 document.getElementById('galleryInput').addEventListener('change', e => {
-  addFiles(e.target.files);
+  const n = e.target.files?.length || 0;
+  if (n === 0) {
+    showToast('Keine Fotos übernommen. Bitte erneut auswählen.');
+    return;
+  }
+  addFiles(e.target.files).catch(err => {
+    showToast('Fehler beim Hinzufügen: ' + (err?.message || 'unbekannt'));
+  });
   e.target.value = '';
 });
 
@@ -1952,12 +1972,14 @@ function stepInput(id, delta) {
 }
 
 function formatCondition(val) {
+  if (typeof val === 'string' && val.toLowerCase().trim() === 'new with tags') return 'new with tags';
   const n = parseFloat(val);
   if (isNaN(n)) return null;
   return n >= 10 ? 'top' : `${n}/10`;
 }
 
 function conditionToNum(val) {
+  if (typeof val === 'string' && val.toLowerCase().trim() === 'new with tags') return 'new with tags';
   if (typeof val === 'number') return Math.round(Math.min(10, Math.max(0.5, val)) * 2) / 2;
   const map = { 'top': 10, 'very good': 9, 'good': 8, 'acceptable': 6.5 };
   return map[String(val).toLowerCase().trim()] ?? null;
@@ -1965,17 +1987,27 @@ function conditionToNum(val) {
 
 function stepCondition(delta) {
   const el  = document.getElementById('m-condition');
+  const cur = String(el.value || '').trim().toLowerCase();
+  if (cur === 'new with tags') {
+    if (delta < 0) { el.value = '10'; syncConditionToDescription(); }
+    return;
+  }
   const val = parseFloat(el.value) || 8;
-  el.value  = Math.min(10, Math.max(0.5, Math.round((val + delta) * 2) / 2));
+  if (val >= 10 && delta > 0) {
+    el.value = 'new with tags';
+    syncConditionToDescription();
+    return;
+  }
+  el.value = Math.min(10, Math.max(0.5, Math.round((val + delta) * 2) / 2));
   syncConditionToDescription();
 }
 
 function syncConditionToDescription() {
   const desc = document.getElementById('m-desc');
   if (!desc) return;
-  const raw     = document.getElementById('m-condition').value;
+  const raw = String(document.getElementById('m-condition').value || '').trim();
   const display = raw ? formatCondition(raw) : '—';
-  desc.value    = desc.value.replace(/^(Condition:\s*).*$/m, `$1${display} 🧼`);
+  desc.value = desc.value.replace(/^(Condition:\s*).*$/m, `$1${display} 🧼`);
 }
 
 const MEAS_DESC_LABELS = {
@@ -2030,7 +2062,7 @@ function openProductModal(idx) {
   document.getElementById('m-model').value      = ki.modell || '';
   document.getElementById('m-fit').value        = ki.fit || '';
   document.getElementById('m-size').value       = ki.size_corrected || ki.groesse || '';
-  document.getElementById('m-condition').value  = 9;
+  document.getElementById('m-condition').value  = (ki.condition === 'new with tags' || ki.zustand === 'new with tags') ? 'new with tags' : (ki.condition ?? ki.zustand ?? 9);
   document.getElementById('m-wash').value       = 'cool denim wash';
   document.getElementById('m-sku').value        = ki.sku || '';
   document.getElementById('m-country').value    = ki.country_of_origin || '';
@@ -2083,6 +2115,25 @@ function openProductModal(idx) {
   if (currentMeasImages.length) updateMeasViewer();
 
   document.getElementById('modalOverlay').classList.add('active');
+  lockBodyScroll();
+}
+
+let _bodyScrollY = 0;
+function lockBodyScroll() {
+  _bodyScrollY = window.scrollY;
+  document.body.style.position = 'fixed';
+  document.body.style.top = `-${_bodyScrollY}px`;
+  document.body.style.left = '0';
+  document.body.style.right = '0';
+  document.body.style.width = '100%';
+}
+function unlockBodyScroll() {
+  document.body.style.position = '';
+  document.body.style.top = '';
+  document.body.style.left = '';
+  document.body.style.right = '';
+  document.body.style.width = '';
+  window.scrollTo(0, _bodyScrollY);
 }
 
 function toggleShopifyImage(productIdx, src) {
@@ -2132,14 +2183,14 @@ function refreshModalStrip(productIdx) {
     strip.appendChild(w);
   });
 
-  makeModalStripSortable(strip, productIdx);
+  makeModalStripSortable(strip);
 
   const counter = document.getElementById('shopifyImageCount');
   if (counter) counter.textContent =
     `${order.length} von ${allImgs.length} für Shopify ausgewählt`;
 }
 
-function makeModalStripSortable(container, productIdx) {
+function makeModalStripSortable(container) {
   if (container._sortableBound) return;
   container._sortableBound = true;
   let drag = null;
@@ -2165,7 +2216,8 @@ function makeModalStripSortable(container, productIdx) {
     drag = null;
     container.querySelectorAll('.modal-thumb-wrap').forEach(w => w.classList.remove('drag-over', 'is-dragging'));
     if (!overEl) return;
-    const p = allProducts[productIdx];
+    const idx = currentModalIdx;
+    const p = allProducts[idx];
     if (!p || !Array.isArray(p.shopifyOrder)) return;
     const from = p.shopifyOrder.indexOf(wrapEl.dataset.src);
     const to   = p.shopifyOrder.indexOf(overEl.dataset.src);
@@ -2174,7 +2226,7 @@ function makeModalStripSortable(container, productIdx) {
     p.shopifyOrder.splice(to, 0, item);
     p.images    = [...p.shopifyOrder];
     p.thumbnail = p.images[0] || p.thumbnail;
-    refreshModalStrip(productIdx);
+    refreshModalStrip(idx);
     saveProductsState();
   }
 
@@ -2220,8 +2272,18 @@ function closeModal() {
   ki.fit              = document.getElementById('m-fit').value;
   ki.size_corrected   = document.getElementById('m-size').value;
   ki.groesse          = ki.size_corrected;
-  ki.condition        = parseFloat(document.getElementById('m-condition').value) || null;
+  const condRaw       = String(document.getElementById('m-condition').value || '').trim();
+  const isNewTags     = condRaw.toLowerCase() === 'new with tags';
+  ki.condition        = isNewTags ? 'new with tags' : (parseFloat(condRaw) || null);
   ki.zustand          = ki.condition;
+  ki.hs_code          = isNewTags ? '6203420' : '6309000';
+  if (isNewTags && !document.getElementById('m-tags').value.toLowerCase().includes('new with tags')) {
+    const t = document.getElementById('m-tags');
+    t.value = t.value ? `${t.value}, new with tags` : 'new with tags';
+  } else if (!isNewTags) {
+    const t = document.getElementById('m-tags');
+    t.value = t.value.split(',').map(x => x.trim()).filter(x => x.toLowerCase() !== 'new with tags').join(', ');
+  }
   ki.wash_details     = document.getElementById('m-wash').value;
   ki.sku              = document.getElementById('m-sku').value;
   ki.country_of_origin = document.getElementById('m-country').value;
@@ -2244,6 +2306,7 @@ function closeModal() {
 
   document.getElementById('modalOverlay').classList.remove('active');
   currentModalIdx = null;
+  unlockBodyScroll();
 }
 
 function handleOverlayClick(e) {
@@ -2340,16 +2403,8 @@ function shopifyAll() {
   pending.forEach(({ idx }, i) => setTimeout(() => shopifySingle(idx), i * 200));
 }
 
-// ── Guard against accidental page refresh ─────────────────────────────────────
-// Block iOS Safari pull-to-refresh (fallback for iOS < 16 where CSS overscroll-behavior has no effect)
-let _touchStartY = 0;
-document.addEventListener('touchstart', e => {
-  _touchStartY = e.touches[0].clientY;
-}, { passive: true });
-document.addEventListener('touchmove', e => {
-  const dy = e.touches[0].clientY - _touchStartY;
-  if (dy > 10 && window.scrollY === 0 && !e.target.closest('.modal-body')) e.preventDefault();
-}, { passive: false });
+// ── Pull-to-refresh prevention via CSS only (overscroll-behavior-y: none on body)
+// JS-based blocker removed — interfered with iOS native pickers and scrollables.
 
 window.addEventListener('beforeunload', e => {
   if (groups.flat().length > 0) {
